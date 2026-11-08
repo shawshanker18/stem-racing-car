@@ -194,7 +194,7 @@ def make_bindings(a, out: Path, asm: dict):
                  if getattr(a, "stage_timeout_s", None) else {})
     cfd_extra.update(json.loads(getattr(a, "cfd_json", None) or "{}"))
     return pipeline.bindings(
-        thrust_csv_path=str(PARTS["part2-simulation"] / "co2_thrust_data.csv"),
+        thrust_csv_path=None,                # the curve inputs/measured.json names
         fixed_hardware_kwargs=asm["fixed_hardware_kwargs"],
         out_dir=str(out / "records"),
         cfd_kwargs=dict(common, max_iterations=a.cfd_iters, **cfd_extra),
@@ -209,47 +209,30 @@ def mass_state(b, geom) -> dict:
             "com_x_mm": m.com_x_m * 1e3, "com_z_mm": m.com_z_m * 1e3, "_report": m}
 
 
-def cfd_and_objective(b, stl: Path, mstate: dict, wheel_moi: float, mu: float) -> dict:
+def cfd_and_objective(b, stl: Path, mstate: dict, asm: dict, a) -> dict:
+    """CFD of the car, then its race time (part2-simulation/race_model.py) twice: at the mass it
+    was built to (T_s), and at exactly the competition-mass target (T_at_target_s), so cars sized
+    to slightly different masses compare on their design, not on the sizing tolerance."""
     import ballast as _bl
+    from dataclasses import replace
     t0 = time.time()
     cfd = b.run_cfd(str(stl))
-    m = mstate["_report"]
-    _, lx, _, lz = m.launch_com()
-    m_car = (mstate["manufactured_mass_g"] * 1e-3 + _bl.CARTRIDGE_KG
-             if "manufactured_mass_g" in mstate else m.total_mass_kg)
-    obj = b.evaluate_objective(D20=cfd.D20, L=cfd.L, m_total=m_car,
-                               h_com=lz, x_com=lx, mu=mu, wheel_moi=wheel_moi)
-    # The same car at exactly the mass target: what a body change is worth once
-    # re-sized, so fixed-skin screening cars compare fairly.
-    m_target = _bl.target_competition_kg() + _bl.CARTRIDGE_KG
-    obj_t = b.evaluate_objective(D20=cfd.D20, L=cfd.L, m_total=m_target,
-                                 h_com=lz, x_com=lx, mu=mu, wheel_moi=wheel_moi)
+    m_car = mstate["manufactured_mass_g"] * 1e-3
+    car = b.make_car(cfd, mstate["_report"], m_car, asm, a.x_front, a.W)
+    r = b.race(car)
+    r_t = b.race(replace(car, m_car=_bl.target_competition_kg()))
     parts = {}
     if cfd.patch_forces:
         for k, v in cfd.patch_forces.items():
             parts[k] = {"D_N": 2 * v["D_half_N"], "L_N": 2 * v["L_half_N"],
                         "y_plus": v.get("y_plus")}
-    return {"D20_N": cfd.D20, "L_N": cfd.L, "converged": cfd.converged,
+    return {"D20_N": cfd.D20, "L_N": cfd.L, "My_Nm": cfd.My, "converged": cfd.converged,
             "residual": cfd.residual_final, "stderr": cfd.force_mean_stderr,
-            "drift": cfd.force_drift, "parts": parts, "T_raw_s": obj.T_raw,
-            "T_at_target_s": obj_t.T_raw,
-            "T_pen_s": obj.T_com_penalized, "gradients": obj.gradients,
+            "drift": cfd.force_drift, "parts": parts,
+            "T_s": r.time_s, "T_at_target_s": r_t.time_s, "v_max_ms": r.v_max,
+            "launch_margin_N": r.launch_margin_N, "guide_impulse_Ns": r.guide_impulse_Ns,
+            "rates": b.rates(car), "unmeasured_inputs": b.unmeasured,
             "seconds": round(time.time() - t0, 1)}
-
-
-def what_if(b, mstate, base: dict, mu: float, moi: float) -> dict:
-    """Race-time deltas from the objective itself, not rules of thumb (ms)."""
-    m = mstate["_report"]
-    _, lx, _, lz = m.launch_com()
-    D, L = base["D20_N"], base["L_N"]
-
-    def T(D=D, mass=m.total_mass_kg, mu_=mu):
-        return b.evaluate_objective(D20=D, L=L, m_total=mass, h_com=lz, x_com=lx,
-                                    mu=mu_, wheel_moi=moi).T_raw
-    ref = T()
-    return {k: (v - ref) * 1e3 for k, v in {
-        "drag -10 %": T(D=0.9 * D), "mass +1 g": T(mass=m.total_mass_kg + 1e-3),
-        "mu 0.010 -> 0.020": T(mu_=0.020)}.items()}
 
 
 def recommend(legal: dict, cfd: dict | None) -> list:
@@ -259,7 +242,7 @@ def recommend(legal: dict, cfd: dict | None) -> list:
         rec.append(f"FIX LEGALITY FIRST: {', '.join(bad)}.")
     if cfd and cfd["parts"]:
         tot = cfd["D20_N"]
-        w = cfd["gradients"].get("dT_dD20", 0.0)
+        w = cfd["rates"]["ms_per_mN_drag"]          # ms per mN = s per N
         shares = sorted(((v["D_N"] / tot, k, v["D_N"]) for k, v in cfd["parts"].items()),
                         reverse=True)
         wheels = sum(s for s, k, _ in shares if k.startswith("wheel"))
@@ -270,6 +253,10 @@ def recommend(legal: dict, cfd: dict | None) -> list:
                        "front-wing shape and position ahead of the front wheels, body width "
                        "around the rear wheels, closed wheel faces. Body-only changes act on "
                        "the minority of the drag.")
+        if cfd.get("launch_margin_N", 1.0) < 0:
+            rec.append(f"A wheel lifts at launch (lowest axle load {cfd['launch_margin_N']:+.2f} N): "
+                       "the thrust line sits above the centre of mass. Lower the centre of mass or "
+                       "the chamber axis (bible Part 4 section 4.2.2).")
         if not cfd["converged"]:
             rec.append("The CFD solve did not pass the residual/drift gate: treat its drag as "
                        "indicative and re-run longer before ranking on it.")
@@ -278,7 +265,12 @@ def recommend(legal: dict, cfd: dict | None) -> list:
 
 # --------------------------------------------------------------------------- report
 def write_report(out: Path, S: dict) -> None:
-    L = [f"# Car report — W {S['scalars']['W']} mm, x_front {S['scalars']['x_front']} mm, "
+    L = []
+    um = (S.get("cfd_initial") or {}).get("unmeasured_inputs")
+    if um:
+        L += [f"> WARNING: these inputs are not measured: {', '.join(um)}. "
+              "Times are model estimates (bible Part 3).", ""]
+    L += [f"# Car report — W {S['scalars']['W']} mm, x_front {S['scalars']['x_front']} mm, "
          f"d_halo {S['scalars']['d_halo']} mm", ""]
     ms = S["mass"]
     L += ["## Mass", "", "| item | value |", "|---|---|",
@@ -299,18 +291,20 @@ def write_report(out: Path, S: dict) -> None:
         L += ["", f"## {tag.replace('_', ' ').title()}", "",
               f"D20 {c['D20_N']:.4f} N, lift {c['L_N']:+.4f} N, converged {c['converged']} "
               f"(residual {c['residual']:.1e}, stderr {100*(c['stderr'] or 0):.2f} %, "
-              f"drift {100*(c['drift'] or 0):.2f} %), T_raw {c['T_raw_s']:.4f} s, "
+              f"drift {100*(c['drift'] or 0):.2f} %), race time {c['T_s']:.4f} s "
+              f"({c['T_at_target_s']:.4f} s at the mass target), launch margin {c['launch_margin_N']:+.3f} N, "
               f"{c['seconds']:.0f} s wall.", "",
               "| part | drag N | share |", "|---|---|---|"]
         for k, v in sorted(c["parts"].items(), key=lambda kv: -kv[1]["D_N"]):
             L.append(f"| {k} | {v['D_N']:.4f} | {100*v['D_N']/c['D20_N']:.1f} % |")
-    if S.get("whatif"):
-        L += ["", "## What-if (race objective)", "", "| change | Δ race time |", "|---|---|"]
-        for k, v in S["whatif"].items():
-            L.append(f"| {k} | {v:+.1f} ms |")
+    c = S.get("cfd_initial")
+    if c:
+        L += ["", "## Exchange rates (race model)", "", "| lever | race time |", "|---|---|"]
+        for k, v in c["rates"].items():
+            L.append(f"| {k.replace('_', ' ')} | {v:+.3f} |")
     L += ["", "## Recommendations", ""] + [f"- {r}" for r in S["recommendations"]]
-    L += ["", "_Absolute times use the project's thrust curve, which has ~60 % of a real "
-          "cartridge's impulse; differences and rankings are what to read._"]
+    L += ["", "_Times use the thrust curve named in inputs/measured.json. Until it is measured "
+          "(bible Part 3) it is the synthetic curve with about 60 % of a real cartridge's impulse._"]
     (out / "report.md").write_text("\n".join(L) + "\n", encoding="utf-8")
 
 
@@ -354,8 +348,6 @@ def main(argv=None):
     out.mkdir(parents=True, exist_ok=True)
     import assembly as p4
     import legality
-    from physics_contract import DEFAULT_ROLLING_MU
-    mu = DEFAULT_ROLLING_MU
 
     S = {"scalars": {"W": a.W, "x_front": a.x_front, "d_halo": a.d_halo},
          "args": vars(a)}
@@ -384,7 +376,6 @@ def main(argv=None):
     chk = legality.check(str(out / "body_half.stl"), asm, S["mass"], S["body"]["field_bodies"],
                          machined_stl=asm["joints"].get("machined_body_half_stl"))
     S["legality"] = {"checks": chk, "summary": legality.summary(chk)}
-    moi = asm["wheel_moi_kg_m2"]
 
     # A fixed skin is not sized for T3.6, so that one rule cannot count against it.
     broken = [f for f in S["legality"]["summary"]["failed"]
@@ -397,8 +388,7 @@ def main(argv=None):
         gate = b.run_quality_gates(copy.deepcopy(geom), "initial", str(out / "gates"))
         if not gate.stl_half_path:
             raise SystemExit(f"initial body failed the CFD gate: {gate.failure_reason}")
-        S["cfd_initial"] = cfd_and_objective(b, Path(gate.stl_half_path), ms, moi, mu)
-        S["whatif"] = what_if(b, ms, S["cfd_initial"], mu, moi)
+        S["cfd_initial"] = cfd_and_objective(b, Path(gate.stl_half_path), ms, asm, a)
 
     S["recommendations"] = recommend(S["legality"]["checks"], S.get("cfd_initial"))
     (out / "summary.json").write_text(json.dumps(S, indent=2, default=str))

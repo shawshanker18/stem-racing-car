@@ -18,6 +18,9 @@ from typing import Optional
 
 import paths  # noqa: F401  -- part1/2/4 on sys.path
 
+ROOT = paths.ROOT
+INPUTS = ROOT / "inputs" / "measured.json"
+
 @dataclass(frozen=True)
 class GateOutcome:
     """Part 3's view of Part 1's quality_gates.GateResult."""
@@ -78,22 +81,10 @@ class CFDOutcome:
     # Half-car force per patch (car, wheels, wings, supports) when Part 4's
     # surfaces are in the case; None for a body-only case.
     patch_forces: Optional[dict] = None
-
-
-@dataclass(frozen=True)
-class ObjectiveOutcome:
-    """Part 3's view of one Part 2 race-objective evaluation.
-
-    T_com_penalized = T_raw + COM penalties (what Part 2's adapter returns
-    as T_penalized). Part 3 adds manufacturing/rule-margin penalties on top
-    — see objective_policy.compose_penalized_time.
-    gradients keys: dT_dD20, dT_dmass, dT_dh_com, dT_dx_com, dT_dL
-    (all w.r.t. the COM-penalized time; units s/N, s/kg, s/m, s/m, s/N).
-    """
-
-    T_raw: float
-    T_com_penalized: float
-    gradients: dict
+    # Full-car pitching moment about the origin (0,0,0) = nose tip on the track
+    # (physics_contract.MOMENT_REFERENCE_POINT_M), N m, at the reference speed. Cm above uses a
+    # placeholder reference length; the race model needs the raw moment (bible Part 4 4.2.2).
+    My: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -102,7 +93,7 @@ class MassReport:
 
     total_mass_kg / com_*_m describe the car as it CROSSES THE LINE -- dry, all
     propellant spent. The CO2 charge is reported separately because it is only
-    aboard at the start; race_objective owns its mass over time. Use
+    aboard at the start; race_model burns it over time. Use
     `launch_com()` for anything evaluated at t=0.
     """
 
@@ -322,20 +313,19 @@ def _decimate_for_cfd(mesh, budget: int = STL_TRIANGLE_BUDGET, _max_backoffs: in
 
 
 def bindings(
-    thrust_csv_path: str,
+    thrust_csv_path: Optional[str],   # None = the curve inputs/measured.json names
     fixed_hardware_kwargs,          # dict, or callable(W_mm, x_front_mm, d_halo_mm) -> dict
     out_dir: str,
     cfd_kwargs: Optional[dict] = None,
     stl_triangle_budget: int = STL_TRIANGLE_BUDGET,
     ballast_material: Optional[str] = None,
 ):
-    """The four bindings run_car uses. cfd_kwargs go to Part 2's run_half_car_cfd verbatim."""
+    """The bindings run_car uses. cfd_kwargs go to Part 2's run_half_car_cfd verbatim.
+    The race time comes from part2-simulation/race_model.py with inputs/measured.json."""
     from unified_phi import compute_mass_com, extract_half_surface, extract_unified_surface
     from cfd_wrapper import run_half_car_cfd
     from mass_com_ingest import FixedHardwareSpec, ingest_mass_com
-    from race_objective import build_smooth_sheet_model
-    from race_objective_adapter import race_value_and_grad_guarded
-    import numpy as np
+    import race_model as rm
 
     cfd_kwargs = dict(cfd_kwargs or {})
 
@@ -353,21 +343,14 @@ def bindings(
             _fh_cache[key] = FixedHardwareSpec(**_build_fh(*key))
         return _fh_cache[key]
 
-    model = build_smooth_sheet_model(thrust_csv_path)
-    # The propellant charge from THIS csv, not mass_com_ingest's nominal 8.00 g.
-    # The two disagreed by 0.13 g: the mass rollup carried 8.00 g at the canister
-    # COM while race_objective burned the csv's own 7.87 g sheet, so the launch
-    # mass the objective saw and the launch mass the record reported were
-    # different numbers. Small (~2 ms of race time) but free to get right.
-    import jax.numpy as _jnp
-    from race_objective import sheet_mass as _sheet_mass
-    _propellant_kg = float(_sheet_mass(_jnp.float64(0.0), model)
-                           - model.mass_sheet_final)
+    measured = rm.load_inputs(str(INPUTS))
+    v = measured["values"]
+    thrust = rm.Thrust.from_csv(thrust_csv_path or str(ROOT / v["thrust_csv"]),
+                                delay_s=float(v.get("trigger_delay_ms") or 0.0) * 1e-3)
+    # The propellant charge from the thrust file itself, so the mass rollup and the race model
+    # burn the same charge.
+    _propellant_kg = float(thrust.prop_kg[0])
     _COMPONENT_KEYS = ("nose", "sidepod", "rearpod", "main_body")
-
-    def _params(D20, L, m_total, h_com, x_com, mu, wheel_moi):
-        return np.array([D20, m_total, mu, wheel_moi, 1.0, h_com, L, x_com],
-                        dtype=np.float64)
 
     def run_quality_gates(geom, candidate_id, run_out_dir):
         os.makedirs(run_out_dir, exist_ok=True)
@@ -466,13 +449,46 @@ def bindings(
                           force_oscillation=health.force_oscillation,
                           force_mean_stderr=getattr(health, "force_mean_stderr", None),
                           force_drift=getattr(health, "force_drift", None),
-                          patch_forces=getattr(health, "patch_forces", None))
+                          patch_forces=getattr(health, "patch_forces", None),
+                          My=2.0 * half.pitching_moment_half)
 
-    def evaluate_objective(D20, L, m_total, h_com, x_com, mu, wheel_moi):
-        p = _params(D20, L, m_total, h_com, x_com, mu, wheel_moi)
-        T_raw, T_pen, grads = race_value_and_grad_guarded(p, model)
-        return ObjectiveOutcome(T_raw=T_raw, T_com_penalized=T_pen, gradients=grads)
+    def make_car(cfd: CFDOutcome, mass: MassReport, m_car_kg: float, asm: dict,
+                 x_front_mm: float, W_mm: float) -> "rm.Car":
+        """The race model's car from the CFD, the mass rollup, the assembly and the inputs file.
+        m_car_kg: the manufactured car without the cartridge (what the T3.6 scale reads)."""
+        from geometry_contract import CHAMBER_AXIS_Z_MM
+        wd = asm["wheel_design"]
+
+        def measured_or(key, fallback):
+            e = measured_raw.get(key, {})
+            return float(e["value"]) if e.get("measured") else fallback
+
+        px, _py, pz = mass.propellant_com
+        return rm.Car(
+            m_car=m_car_kg, m_shell=float(v["cartridge_shell_g"]) * 1e-3,
+            D20=cfd.D20, L20=cfd.L, My20=cfd.My or 0.0,
+            drag_exp=float(v.get("drag_exp") or 0.0),
+            rho_ratio=float(v["air_density_kgm3"]) / 1.225,
+            I_f=measured_or("wheel_I_front_kgm2", wd["front"]["I_gmm2"] * 1e-9),
+            I_r=measured_or("wheel_I_rear_kgm2", wd["rear"]["I_gmm2"] * 1e-9),
+            r_f=wd["front"]["R_mm"] * 1e-3, r_r=wd["rear"]["R_mm"] * 1e-3,
+            mu=float(v["mu_roll"]), R0=float(v["R0_N"]),
+            tau0=float(v["bearing_tau0_Nm"]), k_b=float(v["bearing_k_Nms"]),
+            mu_guide=float(v["mu_guide"]),
+            x_f=x_front_mm * 1e-3, x_r=(x_front_mm + W_mm) * 1e-3,
+            x_g=mass.com_x_m, h_g=mass.com_z_m, x_prop=px, h_prop=pz,
+            h_T=CHAMBER_AXIS_Z_MM * 1e-3)
+
+    def race(car: "rm.Car") -> "rm.Result":
+        return rm.race_time(car, thrust)
+
+    def rates(car: "rm.Car") -> dict:
+        return rm.exchange_rates(car, thrust)
+
+    import json as _json
+    measured_raw = _json.loads(INPUTS.read_text())
 
     return SimpleNamespace(run_quality_gates=run_quality_gates,
-                           compute_mass_report=compute_mass_report,
-                           run_cfd=run_cfd, evaluate_objective=evaluate_objective, model=model)
+                           compute_mass_report=compute_mass_report, run_cfd=run_cfd,
+                           make_car=make_car, race=race, rates=rates, thrust=thrust,
+                           unmeasured=measured["unmeasured"])

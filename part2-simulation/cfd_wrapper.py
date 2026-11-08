@@ -114,6 +114,12 @@ class CFDHealthReport:
     patch_forces: Optional[dict] = None
 
 
+# The adjoint solve is half-car: dT/dSurface = (dT/dD20_full) x (dD20_full/dD20_half) x raw
+# = w_D20 x 2 x raw. Was adjoint_contract.ADJOINT_HALF_CAR_SCALING, deleted with the JAX race
+# objective it lived beside (bible Part 4).
+ADJOINT_HALF_CAR_SCALING = 2.0
+
+
 class CFDRunError(Exception):
     """Raised when meshing or solving fails in a way that cannot produce
     a usable force report. Callers (Stage 6/7/8) must catch this and route
@@ -434,7 +440,6 @@ def run_half_car_adjoint(
         wrong-shaped or partially-populated array.
     """
     import openfoam_adjoint
-    from adjoint_contract import ADJOINT_HALF_CAR_SCALING
 
     path = Path(stl_path)
     if not path.exists():

@@ -55,12 +55,28 @@ def test_t55_probe_sees_a_missing_wall():
 def test_recommendations_follow_the_numbers():
     import run_car
     legal = {"T3.7_clearance": {"pass": False, "margin": -0.1, "note": ""}}
-    cfd = {"D20_N": 0.40, "converged": True, "gradients": {"dT_dD20": 0.45},
+    cfd = {"D20_N": 0.40, "converged": True, "rates": {"ms_per_mN_drag": 0.45}, "launch_margin_N": -0.2,
            "parts": {"wheelF": {"D_N": 0.14}, "wheelR": {"D_N": 0.14}, "car": {"D_N": 0.07},
                      "fwing": {"D_N": 0.05}}}
     rec = run_car.recommend(legal, cfd)
     assert rec[0].startswith("FIX LEGALITY FIRST") and "T3.7" in rec[0]
     assert "Wheels carry 70 %" in " ".join(rec)
+    assert "A wheel lifts at launch" in " ".join(rec)
+
+
+def test_race_from_the_pipeline_bindings():
+    """make_car + race on a made-up CFD result and mass report: the wiring between the
+    pipeline, inputs/measured.json and part2-simulation/race_model.py."""
+    import pipeline
+    b = pipeline.bindings(None, {}, tempfile.mkdtemp())
+    cfd = pipeline.CFDOutcome(D20=0.41, L=0.0, Cm=0.0, A=0.001, converged=True, residual_final=1e-4, My=0.0)
+    mass = pipeline.MassReport(total_mass_kg=0.06935, com_x_m=0.12, com_y_m=0.0, com_z_m=0.030,
+                               propellant_mass_kg=0.008, propellant_com=(0.21, 0.0, 0.031))
+    asm = {"wheel_design": {"front": {"I_gmm2": 123.2, "R_mm": 14.12}, "rear": {"I_gmm2": 150.4, "R_mm": 14.12}}}
+    car = b.make_car(cfd, mass, 0.0482, asm, 46.0, 120.3)
+    r = b.race(car)
+    assert 1.4 < r.time_s < 1.7                      # synthetic thrust curve until Part 3 replaces it
+    assert "mu_roll" in b.unmeasured and "thrust_csv" in b.unmeasured
 
 
 def test_whole_chain_without_cfd():

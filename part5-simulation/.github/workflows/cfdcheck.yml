@@ -10,7 +10,7 @@ on:
     branches: ["cfdcheck/**"]
 
 env:
-  PY_DEPS: pytest numpy scipy pandas trimesh scikit-image shapely rtree mapbox-earcut manifold3d fast_simplification jax jaxlib matplotlib
+  PY_DEPS: pytest numpy scipy pandas trimesh scikit-image shapely rtree mapbox-earcut manifold3d fast_simplification matplotlib scikit-learn pyamg
   SKIN_MM: "1.0503202862661634"
 
 jobs:
@@ -42,8 +42,6 @@ jobs:
         with: { repository: ${{ github.repository_owner }}/part1-simulation, token: "${{ secrets.PARTS_TOKEN }}", path: part1-simulation }
       - uses: actions/checkout@v4
         with: { repository: ${{ github.repository_owner }}/part2-simulation, token: "${{ secrets.PARTS_TOKEN }}", path: part2-simulation }
-      - uses: actions/checkout@v4
-        with: { repository: ${{ github.repository_owner }}/part3-simulation, token: "${{ secrets.PARTS_TOKEN }}", path: part3-simulation }
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - run: pip install $PY_DEPS

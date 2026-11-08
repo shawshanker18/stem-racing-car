@@ -114,40 +114,11 @@ def test_custom_q_ref_is_used_in_to_full_car():
 
 
 def test_constants_defined_twice_still_agree():
-    """Four physical constants have two independent definitions each.
-
-    race_objective.py carries its own TRACK_LENGTH, REFERENCE_SPEED, R_WHEEL and
-    N_WHEELS alongside physics_contract's TRACK_LENGTH_M / REFERENCE_SPEED_MPS
-    and geometry_contract's R_WHEEL_M / N_WHEELS. They agree today and nothing
-    makes them. Changing the reference speed in one place and not the other
-    would leave the CFD solving one condition while the race objective
-    integrates another, with no error anywhere -- just a wrong answer.
-
-    Deliberately a test rather than an import. race_objective is a fitted-model
-    file whose coefficients were regressed against these exact values; pointing
-    it at another module's constants at import time is a bigger change than the
-    risk warrants, and this catches the drift either way.
-    """
-    import os
-    import sys
-    _p1 = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "part1-simulation")
-    if _p1 not in sys.path:
-        sys.path.insert(0, _p1)
-
+    """race_model.py carries its own TRACK_M and REFERENCE_SPEED beside physics_contract's
+    TRACK_LENGTH_M and REFERENCE_SPEED_MPS. If they drift, the CFD solves one condition while
+    the race model integrates another, with no error anywhere. (The wheel radius is no longer
+    duplicated: the race model takes each axle's radius from the assembly.)"""
     import physics_contract as pc
-    import race_objective as ro
-    import geometry_contract as gc
-
-    pairs = [
-        ("track length m", pc.TRACK_LENGTH_M, ro.TRACK_LENGTH),
-        ("reference speed m/s", pc.REFERENCE_SPEED_MPS, ro.REFERENCE_SPEED),
-        ("wheel radius m", gc.R_WHEEL_M, ro.R_WHEEL),
-        ("wheel count", gc.N_WHEELS, ro.N_WHEELS),
-    ]
-    for label, a, b in pairs:
-        assert abs(float(a) - float(b)) < 1e-12, (
-            f"{label} is defined twice and the two disagree: {a} vs {b}. "
-            f"Whichever is wrong, something is solving a different problem "
-            f"than something else.")
+    import race_model as rm
+    assert pc.TRACK_LENGTH_M == rm.TRACK_M
+    assert pc.REFERENCE_SPEED_MPS == rm.REFERENCE_SPEED

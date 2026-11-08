@@ -20,6 +20,7 @@ import numpy as np
 
 G = 9.80665
 TRACK_M = 20.0
+REFERENCE_SPEED = 20.0          # m/s: the CFD's speed; D20, L20, My20 are forces at it
 
 
 @dataclass(frozen=True)
@@ -94,7 +95,7 @@ def _forces(car: Car, th: Thrust, t: float, v: float, a_prev: float):
     m_p = th.prop(t)
     m = car.m_car + car.m_shell + m_p
     m_eff = m + 2 * car.I_f / car.r_f ** 2 + 2 * car.I_r / car.r_r ** 2
-    vr = max(v, 0.0) / 20.0
+    vr = max(v, 0.0) / REFERENCE_SPEED
     aero = car.rho_ratio * vr ** (2.0 - car.drag_exp) if vr > 0 else 0.0
     D, L, My = car.D20 * aero, car.L20 * aero, car.My20 * aero
     T = th.force(t)
@@ -168,6 +169,19 @@ def exchange_rates(car: Car, th: Thrust) -> dict:
     return {"ms_per_mN_drag": out["D20"], "ms_per_g_mass": out["m_car"], "ms_per_0.001_mu": out["mu"],
             "ms_per_mN_R0": out["R0"], "ms_per_mm_com_height": out["h_g"],
             "wheel_I_minus20pct_ms": out["I_wheels_minus20pct_ms"]}
+
+
+def time_with_uncertainty(car: Car, th_runs: list, sds: dict, n: int = 500, seed: int = 0) -> tuple:
+    """(mean, sd) of the race time by Monte Carlo. sds: {Car field: sd}; th_runs: individual
+    thrust runs (cartridge-to-cartridge variation). For RANKING cars use one mean curve and no
+    thrust spread (it is common to every car); for PREDICTING a real time include it (bible 4.9)."""
+    rng = np.random.default_rng(seed)
+    times = []
+    for _ in range(n):
+        kw = {k: getattr(car, k) + rng.normal(0.0, s) for k, s in sds.items()}
+        th = th_runs[rng.integers(len(th_runs))]
+        times.append(race_time(replace(car, **kw), th).time_s)
+    return float(np.mean(times)), float(np.std(times))
 
 
 def load_inputs(path: str = "inputs/measured.json") -> dict:

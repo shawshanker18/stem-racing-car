@@ -27,4 +27,4 @@ ENV PATH=/opt/venv/bin:$PATH \
 
 # Smoke test at build time: both stacks load.
 RUN bash -c "source $FOAM_BASHRC && simpleFoam -help >/dev/null && snappyHexMesh -help >/dev/null" \
- && python -c "import numpy, scipy, trimesh, manifold3d, pymeshlab, jax, sklearn; print('python ok')"
+ && python -c "import numpy, scipy, trimesh, manifold3d, pymeshlab, sklearn, pyamg; print('python ok')"
