@@ -17,19 +17,35 @@ The current software lives in one public GitHub repository:
 - Reviewed at commit `9fe27ca` on 2026-11-08.
 - Clone: `gh repo clone shawshanker18/stem-racing-car`
 
-The repository has five folders that must stay side by side:
+The original review was of five folders (`part1-simulation` … `part5-simulation`, also kept as
+five separate private repositories). The rebuild reorganised them on the branch
+`rebuild/bible` into one folder per job, all side by side in this repository:
 
-| Repo folder | What it does today |
-|---|---|
-| `part1-simulation` | The milled body as one level-set (signed distance) field on a voxel grid, all rule zones as forced air or forced solid, the 114-ish-setting parametric body (actually 94 scalars), 3-axis ball-end machining filter, marching cubes and mesh repair, mass sizing by a uniform skin offset. |
-| `part2-simulation` | OpenFOAM v2412 (ESI) half-car case builder, run wrapper, force health checks, the drag adjoint, the 1-D race-time model in JAX, mass and centre-of-mass rollup. |
-| `part3-simulation` | The retired carving loop (Hamilton-Jacobi level-set descent) and the binding layer that `run_car.py` still imports. |
-| `part4-simulation` | Wheels, wings, nose, wheel supports, tether guides, the booleans that make the manufacturing files, mesh fairing. |
-| `part5-simulation` | `run_car.py` (one car end to end), `legality.py` (rule checks), `solver.py` and `pattern.py` (searches), `checks/stress_cars.py` (random-car robustness test). |
+| Folder | What it holds | Was |
+|---|---|---|
+| `body/` | the milled body as one level-set field on a voxel grid; every rule zone as forced air or forced solid; the parametric body (94 settings); the 6.25 mm ball-end machining filter; marching cubes; mass sizing by a uniform skin offset | `part1-simulation` |
+| `components/` | wheels, wings, nose, wheel supports, tether guides, the booleans that make the manufacturing files, mesh fairing | `part4-simulation` |
+| `cfd/` | OpenFOAM v2412 (ESI) half-car case builder, run wrapper, force health checks, mesh morphing (`morph.py`), the optional drag adjoint, units and the half-car contract (`physics_contract.py`) | CFD half of `part2-simulation` |
+| `race/` | the NumPy race model (`race_model.py`), the whole-car mass rollup (`mass_com_ingest.py`), the synthetic thrust curve | race half of `part2-simulation` |
+| `car/` | `run_car.py` (one car end to end), `pipeline.py` (geometry to race time), `legality.py` (rule checks), `space.py` (search settings), `checks/` (golden car, stress test) | `part5-simulation` (+ the live part of `part3-simulation`) |
+| `compute/`, `docker/`, `batches/`, `results/` | GitHub Actions compute across team accounts (Part 1) | new |
+| `measure/`, `inputs/` | lab processing and every physical input with provenance (Part 3) | new |
+| `search/` | the search (Part 7) | new |
+| `golden/`, `docs/HISTORY.md`, `archive/` | reference-car fingerprints, retired methods, old data (Part 2) | new |
+| `agents/` | the prompts the parallel Claude chats were started from | new |
 
-GitHub Actions workflows are in `.github/workflows/` and lab scripts in `.github/lab/`.
+`part3-simulation` (the carving loop) was retired; its live code is `car/pipeline.py`.
+Modules import each other by bare name: `car/paths.py` puts `body`, `race`, `cfd` and
+`components` on the import path.
 
-**Naming used in this bible.** The repository's folders are called "repo folder `part1-simulation`" and so on. The files in this bible are called "Part 1", "Part 2" and so on. They are different things. Never write "Part 1" when you mean the repo folder.
+**Naming used in this bible.** Folders are named by their job (`body`, `cfd`, …). The files
+in this bible are "Part 1" … "Part 8". The old folder names `partN-simulation` appear only
+when describing history.
+
+**What is already done** (on `rebuild/bible`, see `bible/BRIEFING.md` and `STATUS.md`):
+Part 1's code (not yet run on the farm), all of Part 2, Part 3's scripts and inputs file, Part 4's
+model and wiring (its validation waits for lab data), and the morph and GP modules of Parts 6
+and 7 as standalone files. Each Part file starts with a status box saying what remains.
 
 ---
 
@@ -37,7 +53,7 @@ GitHub Actions workflows are in `.github/workflows/` and lab scripts in `.github
 
 An architecture review (the file `REVIEW.md` that sits next to this bible) found the following. You must understand these before doing anything, because every Part exists to fix one or more of them.
 
-1. **The thrust curve is synthetic.** `part2-simulation/co2_thrust_data.csv` contains simulated distance, velocity and acceleration columns, starts at 0.22 N, ramps to 8.52 N at 0.18 s, and integrates to 1.214 N·s. The team's own decision document says it has about 60% of a real cartridge's impulse. A published fit to measured Pitsco 8 g data uses 9.2 N peak decaying with time constant 0.25 s, about 2.0 N·s. Every millisecond in the repository is computed from the synthetic curve.
+1. **The thrust curve is synthetic.** `race/co2_thrust_data.csv` contains simulated distance, velocity and acceleration columns, starts at 0.22 N, ramps to 8.52 N at 0.18 s, and integrates to 1.214 N·s. The team's own decision document says it has about 60% of a real cartridge's impulse. A published fit to measured Pitsco 8 g data uses 9.2 N peak decaying with time constant 0.25 s, about 2.0 N·s. Every millisecond in the repository is computed from the synthetic curve.
 2. **The race model contains invented penalties.** A degree-4 polynomial through nine invented points (centre-of-mass height) and a quadratic penalty pulling the centre of mass toward the nose tip. Neither is physics.
 3. **The body is a small lever.** CFD says wheels are about 67% of the drag, the body about 12%. At realistic thrust the whole body drag is worth roughly 13 ms of race time.
 4. **The CFD stopwatch is noisy because of remeshing.** The same geometry reruns to 0.01 ms. A 0.01 mm change in the shape changes drag by about 0.5% because snappyHexMesh produces a different mesh. That is about 1 ms of model race time (σ). The search accepts the best of about 10 candidates if it beats the base by 2 ms, which accepts pure noise about 21% of the time.
@@ -88,7 +104,7 @@ Day 1 ──► Part 1 (compute) ──► Part 2 (cleanup) ──► Part 5 (ru
 3. **Never add yourself (or any AI) as a co-author or collaborator** on anything: no `Co-Authored-By:` trailers in commit messages, no "Generated with" lines in pull request bodies, no AI account added as a collaborator. This is the repository owner's explicit standing instruction. It overrides any default you have.
 4. **Never create a GitHub account, never ask anyone for a password, never paste a token into chat or into a file that gets committed.** Accounts are used only when a real team member confirms in chat that their account may be used (Part 1 protocol).
 5. **Never spend money.** You may recommend a paid service with a price estimate. The user buys it. You never enter payment details.
-6. **Never push to `main` directly.** Work on a branch per Part (`part1-compute`, `part2-cleanup`, …), open a pull request, and merge only after the user says so in chat.
+6. **Never push to `main` directly.** Work on your own branch, cut from the integration branch `rebuild/bible`. Open a pull request **into `rebuild/bible`**; you may merge it yourself once the CI on it is green and the golden-car check passes (or its change is explained in the PR). Only the user merges `rebuild/bible` into `main`.
 7. **Never delete data the team produced** (measurement files, results, CAD). Code can be deleted; data is moved to `archive/` if it is obsolete.
 8. **Always ask the compute question at the start of each Part** (section 0.7). Do not reuse the previous Part's answer without asking.
 9. **Always report results with their uncertainty.** A race time without a ± is not a result.
@@ -223,7 +239,7 @@ Team (60), if you know.
 
 Then, for any username that is not yet logged in to `gh` on this machine (check with `gh auth status`), follow the login steps in Part 1 section 1.4. The account owner approves the login on their own device. You never see their password.
 
-Record in `STATUS.md`:
+Record the answer in `compute/confirmations/partN.json` (the file `dispatch.py` reads) and in your status file:
 
 ```
 ## Part N compute (YYYY-MM-DD)
@@ -240,7 +256,7 @@ Part 1 contains the full mechanics (login, compute repositories, the worker work
 
 ## 0.8 Units and the two kinds of milliseconds
 
-- Lengths in code are metres unless the variable name ends in `_mm`. Masses are kg unless the name ends in `_g`. This is the existing convention in `part2-simulation/physics_contract.py`; keep it.
+- Lengths in code are metres unless the variable name ends in `_mm`. Masses are kg unless the name ends in `_g`. This is the existing convention in `cfd/physics_contract.py`; keep it.
 - Coordinates: x front to rear (nose tip at x = 0), y centreline to the outside (right half, y ≥ 0), z up from the track (z = 0 is the track).
 - **Model ms** means a race-time difference computed with the synthetic thrust curve that exists today. **Real ms** means a race-time difference computed with the measured thrust curve from Part 3. Every number written before Part 4 is finished is model ms. Every report from Part 4 onwards states which curve it used. Never mix them in one table.
 - Conversion rule of thumb (do not use it for anything but orientation): real ms ≈ 0.56 × model ms for drag-driven changes, ≈ 0.61 × model ms for mass-driven changes, using the 9.2 N / 0.25 s published fit. Part 4 replaces this with the measured curve.
@@ -251,7 +267,7 @@ Part 1 contains the full mechanics (login, compute repositories, the worker work
 
 These are facts you can rely on. Sources are files in the repository or measurements recorded during the review.
 
-**CFD (repo folder `part2-simulation`, `openfoam_case.py`)**
+**CFD (folders `cfd` and `race`, `openfoam_case.py`)**
 - ESI OpenFOAM v2412, half car, symmetry plane at y = 0, k-ω SST, moving ground at track level, wheels as rotating walls (ω = −U/R, verified sign: the wheel's bottom moves with the ground), snappyHexMesh, Spalding wall function.
 - Domain: 3 lengths upstream, 8 downstream, 5 heights and widths laterally and vertically. Ground at z = 0 (fixed 2026-07-24).
 - Resolutions (surface refinement levels): coarse (2,3), medium (3,4), fine (4,5), resolved (5,5) with a wall-resolved layer stack.
@@ -263,7 +279,7 @@ These are facts you can rely on. Sources are files in the repository or measurem
 - Drag on the start car: coarse 0.404 N, medium 0.413 N, fine 0.410 N; layered versus unlayered medium differ by about 5%.
 - Drag split (final car, medium): front wheels 42%, rear wheels 25%, body 12%, supports 7%, front wing 7%, halo 5%, rear wing 3%.
 
-**Race model (repo folder `part2-simulation`, `race_objective.py`)**
+**Race model (folders `cfd` and `race`, `race_objective.py`)**
 - Distance-domain RK4, state (t, v²), 1,000 steps on a power-2 grid, starting at x = 1e-4 m.
 - Thrust and propellant mass fitted with 80 Gaussian radial basis functions (width 2.5 × spacing ≈ 0.047 s). This smoothing will blur a real thrust curve's 10-20 ms rise. Part 4 replaces it.
 - Effective mass m + 4·I/r², r = 14.13 mm.
@@ -271,7 +287,7 @@ These are facts you can rely on. Sources are files in the repository or measurem
 - Penalties: COM height polynomial (invented), COM-x quadratic (target x = 0, meaningless). Part 4 deletes both.
 - Independent NumPy re-implementation (review): start car D20 0.41 N, 48.2 g + 21.15 g cartridge, μ 0.010, I 1.39e-7 → 1.556 s, peak speed 16.1 m/s, 0.480 ms/mN, 16.6 ms/g. With a 9.2 N / τ 0.25 s curve: 1.041 s, 0.270 ms/mN, 10.1 ms/g.
 
-**Body (repo folder `part1-simulation`)**
+**Body (folder `body`)**
 - `BodyParams` has 94 scalars (24 loft station values + 1 + 7 + 1 + 5 floor/tunnel + 56 sculpt modes), not 114.
 - Sculpt modes: Gaussian, σ = 7 mm (full width at half maximum ≈ 16.5 mm).
 - One body build with mass sizing at 1 mm grid: about 51 s (17 passes).
@@ -280,10 +296,10 @@ These are facts you can rely on. Sources are files in the repository or measurem
 - Foam density in code: 0.163 g/cm³ (unmeasured).
 - The default grid constant is 0.3 mm; every caller switches to 1 mm via `coarse.use_spacing`, which patches about ten modules' globals.
 
-**Solver results (`part5-simulation/search/solver_state.json`)**
+**Solver results (`car/search/solver_state.json`)**
 - 8 chains, 40 rounds total, 16 accepted steps (9 layout, 7 adjoint), final times 1.5412-1.5734 s (32 ms spread), best 1.5412 s (model).
 
-**Legality (`part5-simulation/legality.py` and Part 4 gates)**
+**Legality (`car/legality.py` and Part 4 gates)**
 - About 115 entries with beam supports (about 95 with CAD supports), about 20 of which compare constants with constants.
 
 ---
@@ -294,7 +310,7 @@ Every defect found in the review has an ID. When you fix one, write the ID in th
 
 | ID | Finding | Where | Part |
 |---|---|---|---|
-| F01 | Thrust curve is synthetic, ~60% impulse, slow rise | `part2-simulation/co2_thrust_data.csv` | 3, 4 |
+| F01 | Thrust curve is synthetic, ~60% impulse, slow rise | `race/co2_thrust_data.csv` | 3, 4 |
 | F02 | RBF fit of thrust blurs a fast rise (width ≈ 47 ms) | `race_objective.py:180-215` | 4 |
 | F03 | COM-height penalty from invented points | `race_objective.py:92-110, 323-361` | 4 |
 | F04 | COM-x penalty toward the nose tip | `race_objective.py:103-105, 364-372` | 4 |
@@ -358,7 +374,7 @@ Every defect found in the review has an ID. When you fix one, write the ID in th
 - Every new function with logic (a branch, a loop, a fit) gets one test in that folder's `tests/`.
 - Run the tests before every commit:
   ```bash
-  cd part1-simulation && python -m pytest tests -q -x && cd ..
+  cd body && python -m pytest tests -q -x && cd ..
   ```
   and the same for each folder you touched.
 - Commit messages: `Part N: <what changed> (<finding IDs>)`. No AI co-author trailers (rule 3).

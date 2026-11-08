@@ -1,5 +1,8 @@
 # Part 2 — Cleanup: delete the retired methods, keep the engine
 
+> **Status on 2026-11-08 (branch `rebuild/bible`). Owner: done.** Done on `rebuild/bible` before the agent chats started; kept as the record of what was removed and why. Evidence: `status/setup.md`, `docs/HISTORY.md`, `golden/`. The golden car was rebuilt after every step and after the folder restructure: identical.
+> See `status/` for live progress and `agents/` for the chat prompts.
+
 Read `00_START_HERE.md` first. This Part removes the code for methods that are retired (level-set carving, the adjoint-steered solver, the old pattern search, the four-grid geometry era) without changing what the remaining pipeline produces. Every later Part is easier and safer on a smaller codebase.
 
 **Compute budget for this Part:** the test suite (8 jobs) on every push, plus one golden-car batch (3 builds, no CFD, plus 1 CFD car) at the start and at the end. Under 3 hours of wall time in total.
@@ -17,13 +20,13 @@ Why I need it: I run the golden-car check before and after the cleanup across co
 Expected load for Part 2: about 10 jobs, under 3 hours. One account is enough.
 ```
 
-Then ask which accounts (compute 2), check `gh auth status`, and add `"part2": "<date>"` to `confirmed_for` in `compute/accounts.json` for each.
+Then ask which accounts (compute 2), check `gh auth status`, and write `compute/confirmations/part2.json` with the usernames and the user's words.
 
 ---
 
 ## 2.1 Principle: delete, do not rewrite
 
-- **Deletion over addition.** This Part writes almost no new logic. The one new file (`part5-simulation/pipeline.py`) is assembled by copying existing functions.
+- **Deletion over addition.** This Part writes almost no new logic. The one new file (`car/pipeline.py`) is assembled by copying existing functions.
 - **Behaviour must not change.** A "golden car" is built before the first deletion. After every deletion step, the golden car is rebuilt and compared. If anything differs, the deletion removed something live: revert that step and investigate.
 - **History is written before code is deleted.** Each retired method gets a paragraph in `docs/HISTORY.md` saying what it was, what it measured, and why it was retired, with the numbers. The team's portfolio needs this story; the code does not.
 - **Data is archived, never deleted.** Search states, round files and lab results move to `archive/`.
@@ -36,14 +39,14 @@ Then ask which accounts (compute 2), check `gh auth status`, and add `"part2": "
 
 Three builds of fixed, deterministic cars, without CFD, plus one with CFD:
 
-| Golden id | Command (run from `part5-simulation`) | Why |
+| Golden id | Command (run from `car`) | Why |
 |---|---|---|
 | G1 | `python run_car.py --out ../golden/G1 --body-json '{}' --skin-mm 3.93` | Start car at a fixed skin: no mass-sizing loop, so it is fast and deterministic. |
 | G2 | `python run_car.py --out ../golden/G2 --body-json "$(cat checks/round2_car.json)" --skin-mm 4.2` | A car with non-default body settings. |
 | G3 | `python run_car.py --out ../golden/G3 --body-json '{}'` | Start car with the full mass-sizing loop (exercises sizing, joints, manufacturing files). |
 | G4 | `python run_car.py --out ../golden/G4 --body-json '{}' --skin-mm 3.93 --cfd --res medium --np 4 --cfd-iters 1000 --cfd-json '{"layer_overrides":{"nSurfaceLayers":0}}'` | One CFD solve, to prove the CFD path still works end to end. |
 
-### 2.2.2 `checks/golden.py` (new, in `part5-simulation/checks/`)
+### 2.2.2 `checks/golden.py` (new, in `car/checks/`)
 
 ```python
 """checks/golden.py -- fingerprint a built car so a refactor can prove it changed nothing.
@@ -116,7 +119,7 @@ python compute/dispatch.py --part 2 --batch batches/p2-golden-<date>-before.json
 python compute/collect.py --batch-id p2-golden-<date>-before --wait
 ```
 
-For the worker to return the fingerprints, extend `tools/worker.py`'s `run_car` to call `checks/golden.py`'s `fingerprint` on the output folder and put it in the result. Commit the four fingerprints to `golden/` in the repository. These are now the reference.
+For the worker to return the fingerprints, extend `compute/worker.py`'s `run_car` to call `checks/golden.py`'s `fingerprint` on the output folder and put it in the result. Commit the four fingerprints to `golden/` in the repository. These are now the reference.
 
 ---
 
@@ -124,43 +127,43 @@ For the worker to return the fingerprints, extend `tools/worker.py`'s `run_car` 
 
 ### 2.3.1 Dependency map (measured on commit 9fe27ca with grep)
 
-The live pipeline is `part5-simulation/run_car.py` → Part 1 (`param_body`, `unified_phi`, `machining`, `surface_extraction`, fixed hardware modules) → Part 4 (`assembly`, `joints`, `wings`, `nose`, `beam_support`, `wheel`, `mesh_fairing`) → Part 2 (`cfd_wrapper`, `openfoam_case`, `race_objective`, `race_objective_adapter`, `mass_com_ingest`, `physics_contract`) → `legality.py`.
+The live pipeline is `car/run_car.py` → Part 1 (`param_body`, `unified_phi`, `machining`, `surface_extraction`, fixed hardware modules) → Part 4 (`assembly`, `joints`, `wings`, `nose`, `beam_support`, `wheel`, `mesh_fairing`) → Part 2 (`cfd_wrapper`, `openfoam_case`, `race_objective`, `race_objective_adapter`, `mass_com_ingest`, `physics_contract`) → `legality.py`.
 
 Live code touches retired modules in exactly these places:
 
 | Live file:line | Imports | What is actually used | Action |
 |---|---|---|---|
-| `part1-simulation/machining.py:71` | `phi_updater.reinitialise_sdf` | reinitialisation only | Move `reinitialise_sdf` (and the helper it calls, `_godunov_gradient`) to a new `part1-simulation/sdf.py`; change the three imports. |
-| `part1-simulation/param_body.py:238` | `phi_updater.reinitialise_sdf` | same | same |
-| `part1-simulation/unified_phi.py:873` | `phi_updater.reinitialise_sdf` | same | same |
-| `part1-simulation/unified_phi.py:79, 1023` | `phi_grid.PhiGrid` | the grid container class | Keep `phi_grid.py`, delete its unused methods (section 2.4 step 7). |
-| `part1-simulation/unified_phi.py:1212` | `mass_com_calculator.ComponentMassCOM` | a dataclass | Move the dataclass into `unified_phi.py` (or import the identical one from `part2-simulation/physics_contract.py`, which defines `ComponentMassCOM` with the same fields: check field names match first). Then delete `mass_com_calculator.py`. |
-| `part1-simulation/surface_extraction.py:26` | `phi_grid.PhiGrid` | type use | Keep. |
-| `part5-simulation/run_car.py:392` | `optimizer_contract.DEFAULT_ROLLING_MU` | one constant | Read it from `inputs/measured.json` (Part 4 creates the file; in this Part, point it at `part2-simulation/physics_contract.DEFAULT_ROLLING_MU`, which has the same value 0.010). |
-| `part5-simulation/run_car.py:440-441` | `inner_loop`, `optimizer_contract` | the `--optimise` carving loop | Delete the `--optimise`, `--final-cfd`, `--adj-iters`, `--substeps`, `--trust-mm`, `--smooth-mm`, `--phi-npy` options and their code paths. |
-| `part5-simulation/run_car.py:193-220` | `pipeline_interface.unified_bindings` | `run_quality_gates`, `compute_mass_report`, `run_cfd`, `evaluate_objective` | Replace with `part5-simulation/pipeline.py` (section 2.5). |
-| `part2-simulation/cfd_wrapper.py:436-437` | `openfoam_adjoint`, `adjoint_contract` | `run_half_car_adjoint` | Keep `openfoam_adjoint.py` and `adjoint_contract.py` for now (Part 7 may use the adjoint once as an optional map). Remove the adjoint path from `run_car.py` only. |
-| `part5-simulation/merge_results.py:29` | `candidate_record` | ranks old adjoint-loop records | Delete `merge_results.py`. |
-| `part5-simulation/checks/stress_cars.py:114` | `phi_updater.hj_update` | the fake `--carve` mode (F43) | Delete the `--carve` option and `carve_field`. |
+| `body/machining.py:71` | `phi_updater.reinitialise_sdf` | reinitialisation only | Move `reinitialise_sdf` (and the helper it calls, `_godunov_gradient`) to a new `body/sdf.py`; change the three imports. |
+| `body/param_body.py:238` | `phi_updater.reinitialise_sdf` | same | same |
+| `body/unified_phi.py:873` | `phi_updater.reinitialise_sdf` | same | same |
+| `body/unified_phi.py:79, 1023` | `phi_grid.PhiGrid` | the grid container class | Keep `phi_grid.py`, delete its unused methods (section 2.4 step 7). |
+| `body/unified_phi.py:1212` | `mass_com_calculator.ComponentMassCOM` | a dataclass | Move the dataclass into `unified_phi.py` (or import the identical one from `cfd/physics_contract.py`, which defines `ComponentMassCOM` with the same fields: check field names match first). Then delete `mass_com_calculator.py`. |
+| `body/surface_extraction.py:26` | `phi_grid.PhiGrid` | type use | Keep. |
+| `car/run_car.py:392` | `optimizer_contract.DEFAULT_ROLLING_MU` | one constant | Read it from `inputs/measured.json` (Part 4 creates the file; in this Part, point it at `cfd/physics_contract.DEFAULT_ROLLING_MU`, which has the same value 0.010). |
+| `car/run_car.py:440-441` | `inner_loop`, `optimizer_contract` | the `--optimise` carving loop | Delete the `--optimise`, `--final-cfd`, `--adj-iters`, `--substeps`, `--trust-mm`, `--smooth-mm`, `--phi-npy` options and their code paths. |
+| `car/run_car.py:193-220` | `pipeline_interface.unified_bindings` | `run_quality_gates`, `compute_mass_report`, `run_cfd`, `evaluate_objective` | Replace with `car/pipeline.py` (section 2.5). |
+| `cfd/cfd_wrapper.py:436-437` | `openfoam_adjoint`, `adjoint_contract` | `run_half_car_adjoint` | Keep `openfoam_adjoint.py` and `adjoint_contract.py` for now (Part 7 may use the adjoint once as an optional map). Remove the adjoint path from `run_car.py` only. |
+| `car/merge_results.py:29` | `candidate_record` | ranks old adjoint-loop records | Delete `merge_results.py`. |
+| `car/checks/stress_cars.py:114` | `phi_updater.hj_update` | the fake `--carve` mode (F43) | Delete the `--carve` option and `carve_field`. |
 | `.github/lab/*.py` | `pattern`, `solver` | lab experiments | Delete after `docs/HISTORY.md` records their results. |
-| `part5-simulation/run_car.py`, `solver.py`, checks | `pattern` (bounds, `step0`, flags) | `pattern.LOFT`, `PARTS`, `FLOOR`, `LAYOUT`, `bounds`, `step0`, `get`, `put`, `PART_FLAGS`, `LAYOUT_FLAGS` | Move these definitions into a new `part5-simulation/space.py` (they become Part 7's search space). Delete the search logic in `pattern.py`. |
+| `car/run_car.py`, `solver.py`, checks | `pattern` (bounds, `step0`, flags) | `pattern.LOFT`, `PARTS`, `FLOOR`, `LAYOUT`, `bounds`, `step0`, `get`, `put`, `PART_FLAGS`, `LAYOUT_FLAGS` | Move these definitions into a new `car/space.py` (they become Part 7's search space). Delete the search logic in `pattern.py`. |
 
 ### 2.3.2 Delete list
 
 | Path | Reason |
 |---|---|
 | `part3-simulation/inner_loop.py`, `convergence.py`, `stability_check.py`, `gradient_combiner.py`, `objective_policy.py`, `optimizer_contract.py` and their tests | The retired carving loop (F13-F16). |
-| `part3-simulation/pipeline_interface.py` and its tests | Replaced by `part5-simulation/pipeline.py`. |
+| `part3-simulation/pipeline_interface.py` and its tests | Replaced by `car/pipeline.py`. |
 | `part3-simulation/` folder entirely, once empty (keep `part3-simulation/README.md` content in `docs/HISTORY.md`) | — |
-| `part1-simulation/phi_updater.py` (after moving `reinitialise_sdf`) and its tests | Carving operator with the upwinding (F14) and extension (F15) bugs. |
-| `part1-simulation/stl_assembler.py`, `quality_gates.py`, `mass_com_calculator.py` and their tests | Four-grid era, no live caller (verify with grep after the moves). |
-| `part1-simulation/BUILD_REPORT.md`, stale items in `PLACEHOLDERS.md` (1-4, 9, 11, 13), `SPEC_ASCII.md` (move to `archive/`) | Describe a pipeline that no longer exists (F39). |
-| `part1-simulation/hardware_cad/canister_safety_zone.stl` (if unreferenced) | Constant `CANISTER_SAFETY_ZONE_MM` unused. Check with grep first. |
-| `part2-simulation/candidate_record.py` and its tests | Old adjoint-loop records. |
-| `part5-simulation/solver.py`, `pattern.py` (after `space.py` exists), `merge_results.py` and their tests | Retired searches (F12, F13). |
-| `part5-simulation/search/*` → move to `archive/search-2026-11/` | Data: keep. |
+| `body/phi_updater.py` (after moving `reinitialise_sdf`) and its tests | Carving operator with the upwinding (F14) and extension (F15) bugs. |
+| `body/stl_assembler.py`, `quality_gates.py`, `mass_com_calculator.py` and their tests | Four-grid era, no live caller (verify with grep after the moves). |
+| `body/BUILD_REPORT.md`, stale items in `PLACEHOLDERS.md` (1-4, 9, 11, 13), `SPEC_ASCII.md` (move to `archive/`) | Describe a pipeline that no longer exists (F39). |
+| `body/hardware_cad/canister_safety_zone.stl` (if unreferenced) | Constant `CANISTER_SAFETY_ZONE_MM` unused. Check with grep first. |
+| `cfd/candidate_record.py` and its tests | Old adjoint-loop records. |
+| `car/solver.py`, `pattern.py` (after `space.py` exists), `merge_results.py` and their tests | Retired searches (F12, F13). |
+| `car/search/*` → move to `archive/search-2026-11/` | Data: keep. |
 | `.github/workflows/`: `solver.yml`, `pattern.yml` (if present), `adj_lab.yml`, `line_lab.yml`, `impact.yml`, `impact_wheels.yml`, `noise.yml`, `noise_long.yml`, `noise_var.yml`, `repeat.yml`, `body_lab.yml`, `pinch_lab.yml`, `smooth.yml`, `car_debug.yml`, `car_libs.yml` | Superseded by Part 1's batches and Part 6's experiments. Keep `tests.yml` and `stress.yml` (rewritten, section 2.6), and `image.yml` (Part 1). |
-| `.github/lab/*.py` | Lab experiments; results go to `docs/HISTORY.md`. `render_lab.py` → keep only if `part5-simulation/render.py` does not already do the same. |
+| `.github/lab/*.py` | Lab experiments; results go to `docs/HISTORY.md`. `render_lab.py` → keep only if `car/render.py` does not already do the same. |
 
 Before deleting any file, run:
 
@@ -177,17 +180,17 @@ If anything live still references it, fix that reference first.
 Each step is one commit. After each step: run the affected test folders, rebuild G1 locally (fast), compare with `checks/golden.py compare`. Every few steps, run the full golden batch on the farm.
 
 1. **Write `docs/HISTORY.md`** (section 2.7 has the content to start from). Commit: `Part 2: history of retired methods (F37)`.
-2. **Archive data:** `git mv part5-simulation/search archive/search-2026-11`. Fix any code path that reads `search/` (only `solver.py` and `pattern.py`, both being deleted). Commit.
-3. **Create `part1-simulation/sdf.py`:** move `reinitialise_sdf` and the private helpers it calls from `phi_updater.py` unchanged (copy the functions byte for byte, including docstrings). Change imports in `machining.py:71`, `param_body.py:238`, `unified_phi.py:873` to `from sdf import reinitialise_sdf`. Move the reinitialisation tests from `tests/test_phi_updater.py` into `tests/test_sdf.py`. Rebuild G1 → identical. Commit.
-4. **Create `part5-simulation/space.py`:** move `LOFT`, `PARTS`, `FLOOR`, `FLOOR_START`, `PART_FLAGS`, `LAYOUT`, `LAYOUT_START`, `LAYOUT_FLAGS`, `step0`, `bounds`, `get`, `put`, `_part_default` and anything they call from `pattern.py`, unchanged. Change `run_car.py` and checks to `import space`. Commit.
-5. **Create `part5-simulation/pipeline.py`** (section 2.5). Change `run_car.make_bindings` to use it. Rebuild G1, G3 → identical; run G4 on the farm → D20 identical. Commit.
+2. **Archive data:** `git mv car/search archive/search-2026-11`. Fix any code path that reads `search/` (only `solver.py` and `pattern.py`, both being deleted). Commit.
+3. **Create `body/sdf.py`:** move `reinitialise_sdf` and the private helpers it calls from `phi_updater.py` unchanged (copy the functions byte for byte, including docstrings). Change imports in `machining.py:71`, `param_body.py:238`, `unified_phi.py:873` to `from sdf import reinitialise_sdf`. Move the reinitialisation tests from `tests/test_phi_updater.py` into `tests/test_sdf.py`. Rebuild G1 → identical. Commit.
+4. **Create `car/space.py`:** move `LOFT`, `PARTS`, `FLOOR`, `FLOOR_START`, `PART_FLAGS`, `LAYOUT`, `LAYOUT_START`, `LAYOUT_FLAGS`, `step0`, `bounds`, `get`, `put`, `_part_default` and anything they call from `pattern.py`, unchanged. Change `run_car.py` and checks to `import space`. Commit.
+5. **Create `car/pipeline.py`** (section 2.5). Change `run_car.make_bindings` to use it. Rebuild G1, G3 → identical; run G4 on the farm → D20 identical. Commit.
 6. **Strip `run_car.py`:** remove `--optimise`, `--final-cfd`, `--adj-iters`, `--substeps`, `--trust-mm`, `--smooth-mm`, `--phi-npy` and their code (the block from line ~438 to ~475 at commit 9fe27ca, and the `phi_npy` branch in `build_body`, lines 56-65). Read `DEFAULT_ROLLING_MU` from `physics_contract`. Commit.
-7. **Delete repo folder `part3-simulation`** entirely. Remove it from `part5-simulation/paths.py` `PARTS` and from `tests.yml`. Commit.
+7. **Delete the retired folder `part3-simulation`** entirely. Remove it from `car/paths.py` `PARTS` and from `tests.yml`. Commit.
 8. **Delete `phi_updater.py`**, `stl_assembler.py`, `quality_gates.py`, `mass_com_calculator.py` (after moving `ComponentMassCOM`), `candidate_record.py`, `merge_results.py`, `solver.py`, the search logic left in `pattern.py` (then the file), and all their tests. After each file: grep, run tests. Commit per file.
-9. **Prune `PhiGrid`** (`part1-simulation/phi_grid.py`): use a dead-code finder to list unused methods, then confirm each with grep:
+9. **Prune `PhiGrid`** (`body/phi_grid.py`): use a dead-code finder to list unused methods, then confirm each with grep:
    ```bash
    pip install vulture
-   vulture part1-simulation part2-simulation part4-simulation part5-simulation --min-confidence 60 --exclude "*/tests/*"
+   vulture body cfd components car --min-confidence 60 --exclude "*/tests/*"
    ```
    The Part 1 audit identified these as uncalled from any pipeline: `PhiGrid.init`, `PhiGrid.remap`, `PhiGrid.build_hard_masks`, `PhiGrid._validate_masks`, `extract_surface` (the four-grid one), `_check_accessibility`, `_check_wall_thickness`, `cargo_placement_is_buildable`, `WHEEL_KEEPOUT_MARGIN_M`, `CANISTER_SAFETY_ZONE_MM`, `ATTACHMENT_STRIP_*`, `PHI_SNAPSHOT_COMPONENT_KEYS`, `LABEL_NOSE` and `DENSITY_NOSE_KGM3` (the nose zone is always forced air), the nose wall-thickness loop in `unified_phi.py:1134-1155`, the no-op `np.take(...)` at `phi_updater.py:51` (gone with the file), and the nonsense line `surface_extraction.py:726` (`nx, ny, nz = mesh.bounds[1]-mesh.bounds[0], 0, 0`: read its use; fix or delete). Delete each only after grep shows no live use. Commit in small groups.
 10. **One machinability model.** `machining.reachable_air` is the live model. `unified_phi.enforce_machinability` (lines ~925-970) was used only by the adjoint path: delete it if grep shows no other caller. `surface_extraction._find_inaccessible_faces` reports inaccessible area to the gate: keep it for now as a report only; Part 5 decides. (F31)
@@ -202,7 +205,7 @@ Each step is one commit. After each step: run the affected test folders, rebuild
 
 ---
 
-## 2.5 `part5-simulation/pipeline.py` (replaces `pipeline_interface.unified_bindings`)
+## 2.5 `car/pipeline.py` (replaces `pipeline_interface.unified_bindings`)
 
 Build it by **copying**, not rewriting, from `part3-simulation/pipeline_interface.py` at commit 9fe27ca:
 
@@ -255,7 +258,7 @@ def bindings(thrust_csv_path: str, fixed_hardware_kwargs, out_dir: str,
 
 `run_car.make_bindings` keeps its frame computation (the fixed meshing frame from Ref A − 41 mm to Ref B + 41 mm, 43.5 mm half-width, 66 mm high: it removes domain-size noise and stays) and calls `pipeline.bindings(...)` with the same `cfd_kwargs` it builds today.
 
-Add `part5-simulation/tests/test_pipeline.py`: build the bindings with the real CSV, call `evaluate_objective(D20=0.41, L=0.0, m_total=0.0482+0.02115, h_com=0.03, x_com=0.1, mu=0.010, wheel_moi=1.39e-7)` and assert `T_raw` is within 1e-6 s of the value the old `unified_bindings` returns for the same inputs (compute that value once before deleting Part 3 and paste it into the test as a constant with a comment saying where it came from).
+Add `car/tests/test_pipeline.py`: build the bindings with the real CSV, call `evaluate_objective(D20=0.41, L=0.0, m_total=0.0482+0.02115, h_com=0.03, x_com=0.1, mu=0.010, wheel_moi=1.39e-7)` and assert `T_raw` is within 1e-6 s of the value the old `unified_bindings` returns for the same inputs (compute that value once before deleting Part 3 and paste it into the test as a constant with a comment saying where it came from).
 
 ---
 
@@ -283,20 +286,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { part: part1-simulation, shard: 0, of: 4 }
-          - { part: part1-simulation, shard: 1, of: 4 }
-          - { part: part1-simulation, shard: 2, of: 4 }
-          - { part: part1-simulation, shard: 3, of: 4 }
-          - { part: part2-simulation, shard: 0, of: 1 }
-          - { part: part4-simulation, shard: 0, of: 1 }
-          - { part: part5-simulation, shard: 0, of: 1 }
+          - { part: body, shard: 0, of: 4 }
+          - { part: body, shard: 1, of: 4 }
+          - { part: body, shard: 2, of: 4 }
+          - { part: body, shard: 3, of: 4 }
+          - { part: cfd, shard: 0, of: 1 }
+          - { part: components, shard: 0, of: 1 }
+          - { part: car, shard: 0, of: 1 }
           - { part: compute,          shard: 0, of: 1 }
     steps:
       - uses: actions/checkout@v4
       - name: pytest
         working-directory: ${{ matrix.part }}
         env:
-          PART2_PATH: ${{ github.workspace }}/part2-simulation
+          PART2_PATH: ${{ github.workspace }}/cfd
         run: |
           files=$(ls tests/test_*.py | awk -v s=${{ matrix.shard }} -v n=${{ matrix.of }} 'NR % n == s')
           python -m pytest $files -q -p no:cacheprovider --tb=short -W ignore
@@ -308,7 +311,7 @@ jobs:
       options: --user 0
     steps:
       - uses: actions/checkout@v4
-      - working-directory: part5-simulation
+      - working-directory: car
         run: |
           python run_car.py --out ../out/G1 --body-json '{}' --skin-mm 3.93
           python checks/golden.py compare ../golden/G1.fp.json ../out/G1
@@ -338,7 +341,7 @@ Write it in plain sentences. One section per retired method. Use these facts (al
 
 **Impact sweeps (`impact.yml`).** Rear-wing variants, support discs, wheel rounding; rounded wheels found illegal under T7.4 (contact width measured without fillets).
 
-**Body generation decision (2026-09-27/28, `part5-simulation/docs/BODY_GENERATION_DECISION.md`).** Move this document to `docs/` unchanged and link it. It records the team's reasons for the hybrid parametric body and no ballast.
+**Body generation decision (2026-09-27/28, `car/docs/BODY_GENERATION_DECISION.md`).** Move this document to `docs/` unchanged and link it. It records the team's reasons for the hybrid parametric body and no ballast.
 
 ---
 

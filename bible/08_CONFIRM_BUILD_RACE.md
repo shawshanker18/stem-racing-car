@@ -1,5 +1,8 @@
 # Part 8 — Confirm, build, scrutineer, race, compare
 
+> **Status on 2026-11-08 (branch `rebuild/bible`). Owner: chat E.** Not started.
+> See `status/` for live progress and `agents/` for the chat prompts.
+
 Read `00_START_HERE.md` first. This Part takes the car (or up to three cars) chosen at the end of Part 7, checks the prediction with the most accurate CFD the team can afford, exports production files, supports manufacture and paperwork, and compares the built car's real races with the model.
 
 **Compute budget for this Part:** confirmation runs: fine mesh with layers (about 4.5 h each, 9-12 jobs), wall-resolved meshes chained across 2-4 segments of 5.5 h (6-12 segments), unsteady averaging chained across several segments (10-30 segments), production builds at 0.3 mm grid (a few jobs, possibly too big for a 16 GB machine). About 40-60 long jobs. A paid machine (Part 1 section 1.12) may be worth it here; ask the user.

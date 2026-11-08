@@ -1,5 +1,8 @@
 # Part 1 — Compute and accounts (GitHub CLI, many team accounts)
 
+> **Status on 2026-11-08 (branch `rebuild/bible`). Owner: chat A.** Code written and unit-tested: `compute/` (dispatch, collect, setup, worker, split test), `docker/Dockerfile` and `requirements.lock`, `.github/workflows/image.yml`. Not yet done: building the image, making the package public, creating the compute repositories, the self-test batch, switching `tests.yml` into the image.
+> See `status/` for live progress and `agents/` for the chat prompts.
+
 Read `00_START_HERE.md` first. This Part builds the machinery every later Part uses to run CFD and builds on free GitHub Actions machines spread across several team members' GitHub accounts, driven entirely from the GitHub CLI (`gh`).
 
 **Compute budget for this Part:** about 10 short test jobs per account plus one image build. Under 2 hours of wall time.
@@ -159,7 +162,9 @@ The Python scripts in this Part do the same with `subprocess` and an environment
 
 ```
 compute/
-  accounts.json              # who, cap, role; NO tokens
+  accounts.json              # who and their parallel-job cap; NO tokens
+  confirmations/partN.json   # which accounts the user confirmed for Part N
+  kinds_cfd.py, kinds_search.py  # job kinds added by Parts 6 and 7
   worker/car.yml             # template of the worker workflow, copied into each compute repo
   worker/README.md           # one paragraph: what this repo is, who to ask
   setup_compute_repos.py     # creates/updates <user>/stem-compute for every account
@@ -187,13 +192,17 @@ results/db.jsonl             # one line per finished case, appended by collect.p
   "compute_repo_name": "stem-compute",
   "reserve_on_main": 2,
   "accounts": [
-    {"user": "shawshanker18", "plan": "pro",  "cap": 40, "confirmed_for": {"part1": "2026-11-09"}},
-    {"user": "alice-example", "plan": "free", "cap": 20, "confirmed_for": {"part1": "2026-11-09"}}
+    {"user": "shawshanker18", "plan": "pro",  "cap": 40},
+    {"user": "alice-example", "plan": "free", "cap": 20}
   ]
 }
 ```
 
-`confirmed_for` records, per Part, the date the user confirmed this account. `dispatch.py` refuses to use an account that is not confirmed for the current Part (pass `--part N`). This enforces the per-Part question mechanically.
+Which accounts the user confirmed for which Part lives in a separate file per Part,
+`compute/confirmations/partN.json` (`{"users": [...], "user_said": "<their words>", "date": ...}`),
+so that chats working on different Parts in parallel never edit the same file.
+`dispatch.py` and `setup_compute_repos.py` refuse any account not listed for the Part they run
+(pass `--part N`). This enforces the per-Part question mechanically.
 
 ---
 
@@ -248,7 +257,7 @@ RUN bash -c "source $FOAM_BASHRC && simpleFoam -help >/dev/null && snappyHexMesh
 
 Notes the agent must respect:
 
-- `FOAM_BASHRC` is read by `find_openfoam_bashrc` in `part2-simulation/openfoam_case.py`, so the existing code finds OpenFOAM without changes. Verify the path inside the image with `docker run --rm opencfd/openfoam-default:2412 bash -lc 'ls /usr/lib/openfoam/'` and adjust if it differs.
+- `FOAM_BASHRC` is read by `find_openfoam_bashrc` in `cfd/openfoam_case.py`, so the existing code finds OpenFOAM without changes. Verify the path inside the image with `docker run --rm opencfd/openfoam-default:2412 bash -lc 'ls /usr/lib/openfoam/'` and adjust if it differs.
 - OpenMPI refuses to run as root unless the two `OMPI_ALLOW_RUN_AS_ROOT*` variables are set. GitHub job containers run as root (section 1.7 forces it), so they are required.
 - If `opencfd/openfoam-default:2412` does not exist on Docker Hub when you build, check `https://hub.docker.com/r/opencfd/openfoam-default/tags` and use the 2412 tag listed there. Do not move to another OpenFOAM version without the user's approval: the adjoint and the case dictionaries were verified against v2412.
 
@@ -357,7 +366,7 @@ jobs:
           echo "cpu: $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2)  nproc: $(nproc)  mem: $(free -g | awk '/Mem/{print $2}') GB"
       - name: Run the case
         working-directory: code
-        run: python tools/worker.py --batch "${{ inputs.batch }}" --id ${{ matrix.id }} --out ../out
+        run: python compute/worker.py --batch "${{ inputs.batch }}" --id ${{ matrix.id }} --out ../out
       - name: Results
         if: always()
         uses: actions/upload-artifact@v4
@@ -382,16 +391,16 @@ Rules for the worker:
 
 - The job never pushes anything anywhere. It uploads artifacts only.
 - The `Results` step runs `if: always()`, so a failed case still returns its JSON with the error. A failed car is a result.
-- One matrix entry is one case. A case may contain more than one CFD solve (for example a base and two morphs); `tools/worker.py` decides.
+- One matrix entry is one case. A case may contain more than one CFD solve (for example a base and two morphs); `compute/worker.py` decides.
 
 ---
 
-## 1.8 `tools/worker.py` — the single entry point every job runs
+## 1.8 `compute/worker.py` — the single entry point every job runs
 
 The worker reads one case from the batch file and dispatches on `case["kind"]`. Later Parts add kinds. Part 1 implements two kinds: `selftest` and `car`.
 
 ```python
-"""tools/worker.py -- run ONE case from a batch file on a compute machine.
+"""compute/worker.py -- run ONE case from a batch file on a compute machine.
 
 Reads:  batches/<id>.json (path given by --batch), the case with "id" == --id
 Writes: <out>/case_<id>.json  (always, even on failure)
@@ -400,7 +409,7 @@ Writes: <out>/case_<id>.json  (always, even on failure)
 
 Kinds:
   selftest   prints machine info, runs a 1-iteration OpenFOAM tutorial-sized case
-  car        builds one car with part5-simulation/run_car.py and (optionally) runs CFD
+  car        builds one car with car/run_car.py and (optionally) runs CFD
   (Part 6 adds: family, morph, mesh_study; Part 7 adds: legal_only; Part 8 adds: chained)
 """
 from __future__ import annotations
@@ -436,7 +445,7 @@ def run_selftest(case: dict, out: Path) -> dict:
 
 
 def run_car(case: dict, out: Path) -> dict:
-    sys.path.insert(0, str(ROOT / "part5-simulation"))
+    sys.path.insert(0, str(ROOT / "car"))
     import run_car as rc
     args = ["--out", str(out / "car")] + list(case["argv"])     # the batch carries run_car's argv
     S = rc.main(args)
@@ -602,7 +611,7 @@ def main() -> None:
     readme = (HERE / "worker" / "README.md").read_text()
     name = cfg["compute_repo_name"]
     for acc in cfg["accounts"]:
-        if f"part{a.part}" not in acc.get("confirmed_for", {}):
+        if acc["user"] not in confirmed(a.part):        # compute/confirmations/partN.json
             print(f"skip {acc['user']}: not confirmed for Part {a.part}")
             continue
         u, repo = acc["user"], f"{acc['user']}/{name}"
@@ -661,7 +670,7 @@ ROOT = HERE.parent
 def weights(cfg: dict, part: int) -> dict:
     w = {}
     for acc in cfg["accounts"]:
-        if f"part{part}" in acc.get("confirmed_for", {}):
+        if acc["user"] in confirmed(part):              # compute/confirmations/partN.json
             cap = acc["cap"] - (cfg["reserve_on_main"] if acc["user"] == cfg["main"] else 0)
             if cap > 0:
                 w[acc["user"]] = cap
@@ -857,7 +866,7 @@ Notes:
    ```
    (A workflow file must exist on the default branch for `workflow_dispatch` to be available. If `image.yml` is not yet on `main`, ask the user to approve merging a pull request that only adds `image.yml`, or use the `push: paths: docker/**` trigger by pushing to a branch.)
 5. **Make the package public** (ask the user). Verify from a teammate account.
-6. **Write** `compute/` files and `tools/worker.py`. Run `python -m pytest compute/tests -q`.
+6. **Write** `compute/` files and `compute/worker.py`. Run `python -m pytest compute/tests -q`.
 7. **Fill** `compute/accounts.json` (no tokens). Commit.
 8. **Create the compute repositories:** `python compute/setup_compute_repos.py --part 1`.
 9. **Self-test batch:** a batch with one `selftest` case per account plus one `car` case per account (the start car with medium CFD, no layers, 1,000 iterations, exactly the current search settings). Commit and push it, then:

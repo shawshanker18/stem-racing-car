@@ -1,5 +1,8 @@
 # Part 4 — The race model: from car properties to a 20 m time
 
+> **Status on 2026-11-08 (branch `rebuild/bible`). Owner: chat A (validation).** `race/race_model.py` done (sections 4.2-4.5, 4.8, 4.9), wired into `car/pipeline.py` and `car/run_car.py`; the JAX model is retired. Not yet done: CFD at several speeds (4.6) and validation against real runs (4.7), which need lab data and the reference car.
+> See `status/` for live progress and `agents/` for the chat prompts.
+
 Read `00_START_HERE.md` first. This Part rebuilds the 1-D race model so that it runs on measured inputs, contains only physics, includes the resistances that were missing (constant and bearing resistance, tether guides, launch pitch), and is validated against real timed runs.
 
 **Compute budget for this Part:** a few CFD cars (the reference car from Part 3 M9 at two or three speeds, plus its pitching moment). About 6-10 jobs, under 3 hours. Everything else runs locally in seconds.
@@ -21,7 +24,7 @@ Then compute 2 (which accounts). Record in `STATUS.md`.
 
 ## 4.1 What exists today and what is wrong with it
 
-File: `part2-simulation/race_objective.py` (649 lines, JAX), wrapped by `race_objective_adapter.py`, called through `pipeline.evaluate_objective` (after Part 2).
+File: `race_objective.py (retired in Part 4)` (649 lines, JAX), wrapped by `race_objective_adapter.py`, called through `pipeline.evaluate_objective` (after Part 2).
 
 What it does: integrates the car's motion in the distance domain (state: time t and q = v²) with RK4 over 1,000 steps on a grid clustered near the start, from x = 1e-4 m to 20 m.
 
@@ -45,7 +48,7 @@ Defects:
 | — | JAX `value_and_grad` re-traces every call (about 1 s per call) and leaks memory mappings (documented in the file; mitigated by raising `vm.max_map_count`) | slow and fragile, for a gradient nothing needs any more |
 | — | One wheel inertia and one radius for all four wheels | front and rear wheels differ (13.25 vs 17.25 mm wide) |
 
-Decision: **replace the JAX model with a NumPy model** in a new file `part2-simulation/race_model.py`. Gradients are no longer used by any search (the adjoint loop is gone). Where an exchange rate is wanted (ms per mN of drag, ms per gram), it is computed by central finite differences, which on this smooth model are accurate to better than 0.1%. This deletes the JAX dependency, its memory leak, the RBF fit and the hash-locking ritual.
+Decision: **replace the JAX model with a NumPy model** in a new file `race/race_model.py`. Gradients are no longer used by any search (the adjoint loop is gone). Where an exchange rate is wanted (ms per mN of drag, ms per gram), it is computed by central finite differences, which on this smooth model are accurate to better than 0.1%. This deletes the JAX dependency, its memory leak, the RBF fit and the hash-locking ritual.
 
 Keep `race_objective.py` only until `pipeline.py` and the tests point at `race_model.py`, then delete it, `race_objective_adapter.py`, `race_objective_hash.txt`, `adjoint_contract.py` (if Part 7 does not need it) and their tests. Remove `jax` and `jaxlib` from `docker/requirements.lock` and rebuild the image (Part 1 section 1.6).
 
@@ -116,7 +119,7 @@ The car does not move until thrust exceeds static resistance; with a 9 N thrust 
 
 ---
 
-## 4.3 `part2-simulation/race_model.py` (complete)
+## 4.3 `race/race_model.py` (complete)
 
 ```python
 """race_model.py -- 20 m race time of a CO2 car from measured inputs. NumPy only.
@@ -329,7 +332,7 @@ Before switching, run both models on the same inputs (old synthetic CSV, μ = 0.
 | dT/dD | (old `gradients`) | 0.480 ms/mN | within 2% |
 | dT/dm | (old) | 16.6 ms/g | within 2% |
 
-Put this comparison in `part2-simulation/tests/test_race_model.py` as a regression test with the numbers from the old model pasted in as constants (computed once, before deleting it, with a comment saying so).
+Put this comparison in `race/tests/test_race_model.py` as a regression test with the numbers from the old model pasted in as constants (computed once, before deleting it, with a comment saying so).
 
 ---
 
@@ -370,7 +373,7 @@ Never fit more than one free parameter to one car's runs.
 
 ---
 
-## 4.8 Tests (`part2-simulation/tests/test_race_model.py`)
+## 4.8 Tests (`race/tests/test_race_model.py`)
 
 Each test states its expected value analytically.
 
@@ -403,13 +406,13 @@ def time_with_uncertainty(car: Car, th_runs: list[Thrust], sds: dict, n: int = 5
 
 Use each individual M1 run (not the mean curve) as a sample of the thrust: cartridge-to-cartridge variation is likely the largest single uncertainty in a real race, and it is common to every car, so it **cancels** in a comparison between two cars raced with the same cartridge batch. For **ranking cars**, use the mean curve and ignore thrust uncertainty. For **predicting a real time**, include it.
 
-Write `measure/tests` or `part2-simulation/tests` coverage for this function with a trivial car where the answer is known (sd = 0 → zero spread).
+Write `measure/tests` or `cfd/tests` coverage for this function with a trivial car where the answer is known (sd = 0 → zero spread).
 
 ---
 
 ## 4.10 Outputs of this Part
 
-1. `part2-simulation/race_model.py` and its tests.
+1. `race/race_model.py` and its tests.
 2. Exchange rates on the measured curve for the start car, in a table in `STATUS.md`:
 
    | Rate | Value (real ms) |

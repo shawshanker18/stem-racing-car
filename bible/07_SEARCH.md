@@ -1,5 +1,8 @@
 # Part 7 — The search: finding the fastest legal car the model can describe
 
+> **Status on 2026-11-08 (branch `rebuild/bible`). Owner: chat D (tooling), chat E (run).** `search/gp.py` exists and is tested on a known function. Everything else not started.
+> See `status/` for live progress and `agents/` for the chat prompts.
+
 Read `00_START_HERE.md` first. Do not start this Part until the gates of Parts 4, 5 and 6 are passed: the search optimises the race model (Part 4) over legal cars (Part 5) measured by the stopwatch (Part 6). A search on a wrong objective finds the wrong car faster.
 
 The search has four stages:
@@ -65,7 +68,7 @@ Why "at target": every car is re-sized to the target mass, but the sizing loop s
 
 ### 7.2.1 Registry: `search/space.json`
 
-Generated once from `part5-simulation/space.py` (Part 2 moved the parameter definitions there) plus the new parameters below, then edited by hand. One entry per setting:
+Generated once from `car/space.py` (Part 2 moved the parameter definitions there) plus the new parameters below, then edited by hand. One entry per setting:
 
 ```json
 {"name": "fw.aoa_deg", "group": "front_wing", "type": "float", "lo": -2.0, "hi": 14.0,
@@ -280,7 +283,7 @@ Each iteration is about 90-100 morph jobs. Expect 3-8 iterations.
 
 ### 7.5.3 Optional: one adjoint map
 
-`part2-simulation/openfoam_adjoint.py` can produce a surface drag sensitivity map. It failed as a gradient (Part 2 `docs/HISTORY.md`). It may still be useful as a **map** of where on the body drag is sensitive, to place new sculpt modes where the existing 56 do not reach. Only if the user wants it:
+`cfd/openfoam_adjoint.py` can produce a surface drag sensitivity map. It failed as a gradient (Part 2 `docs/HISTORY.md`). It may still be useful as a **map** of where on the body drag is sensitive, to place new sculpt modes where the existing 56 do not reach. Only if the user wants it:
 
 1. Run one adjoint at the Stage C car (medium, the chosen configuration).
 2. Compare its projection onto the 56 modes with the morph-measured mode slopes from step 2 (that is a free, precise gradient check). Report the correlation.

@@ -1,5 +1,8 @@
 # Part 5 — Rules, legality, mass and manufacturing margins
 
+> **Status on 2026-11-08 (branch `rebuild/bible`). Owner: chat B.** Not started, except the regulation answers (section 5.1.1), read from the PDF.
+> See `status/` for live progress and `agents/` for the chat prompts.
+
 Read `00_START_HERE.md` first. This Part makes the legality checks at least as strict as the regulations, measures them on the files that actually get manufactured, puts every regulation number in one place, and gives the car a mass margin that survives real-world uncertainty.
 
 A car that is fast in the model and fails scrutineering is worth nothing. Every check here is a hard gate in the search (Part 7): an illegal car is never measured in CFD.
@@ -54,11 +57,35 @@ tell me the exact wording or numbers:
 
 ---
 
+### 5.1.1 Answered from the regulations PDF (read 2026-11-08)
+
+The PDF is in the private repository `shawshanker18/part1-simulation`, branch
+`fix/rules-and-block`, file `STEM Racing Professional Class Tech Regs 2025-26 UAE.pdf`
+(58 pages, dated 20 August 2025). Read it with `gh` as `shawshanker18`. **Never commit it to the
+public repository** `stem-racing-car`. These answers replace the questions above; ask the user
+only about what the PDF does not settle.
+
+| Q | Rule | What the PDF says (page) | Consequence for the code |
+|---|---|---|---|
+| 1 | T7.6-T7.8 | T7.6: all four wheels touch the track at the same time across the full contact width, with a full cartridge in, car on its wheels, before launch and during racing. T7.7: the diameter is consistent across the contact width (no tread). T7.8: all four rotate freely on a 3° maximum incline. (p.31) | Front and rear diameters may differ. Check roundness/constancy across the tread and that all four wheels touch (axle heights follow each axle's radius). Free-spin check uses the design clearance. |
+| 2 | T7.9 | Zones from the inside edge of each wheel's contact width to the car's extreme width, from the track to 65 mm. T7.9.1 5 mm ahead of the front wheels; T7.9.4 5 mm behind the rear; T7.9.2 behind the front wheels: 15 mm deep at the inner edge, far side at 60°, 30 mm wide; T7.9.3 ahead of the rear wheels: 5 mm at the inner edge, far side at 45°, 30 mm wide. Scrutineering tools are made to the diagram. (p.32) | `body/wheel_visibility_zones.py` already matches the diagram (checked 2026-11-08). Record the confirmation in `regs.py`. |
+| 3 | T4.7 | Official team number on the body between the halo's front edge and Ref A, clearly visible in plan view, minimum text height 8 mm; plus "A" or "B" (minimum 8 mm) on the respective car. No width rule. (p.25) | The footprint check must fit the number **and** the letter at 8 mm height. Width is the team's font choice: **ASK THE USER** for their number and font width once; until then keep 8 × 14 mm and label it an assumption. |
+| 4 | T4.6 | A logo decal (artwork supplied, T1.12) wholly adhered to each side and 100% visible in the respective side view. T4.8: decal thickness at most 0.5 mm. (p.25) | 100% visible, no allowance. T1.12 (p.11): the decal is 30 mm horizontal × 15 mm vertical, black or white vinyl with a 1 mm keyline, the official artwork. Confirmed. |
+| 5 | T4.4.4 | Notch centre 34.0 ± 1.0 mm above the track; the halo pocket's bottom at 24.0 mm and parallel to the track. The notch centre is 10.0 mm above the bottom of the halo (Appendix ix). (p.24, appendix) | T4.4.4 margin = 1.0 − \|pocket floor (where the halo rests) + 10.0 − 34.0\|. "Parallel" is the flatness check. |
+| 6 | T3.3 / T1.1 | Only: the body (one piece of Model Block, holding the cargo and chamber); nose cone assembly (front wing support, front wings, end plates); rear wing assembly (support, wings, end plates); front and rear wheel support systems (rotating wheels, non-rotating support structure); front and rear tether line guides; surface finishing and decals; logo decals (2); halo; driver's helmet; legal ballast. Adhesives with no dimensional impact are allowed. (p.7-8) | `T3.3_components`: the assembly's part names map onto this list; anything else fails. |
+| 7 | T1.22 | Ballast only in the container under the halo, reached through the halo/helmet aperture; for example fishing lead weights. The only permitted location. (p.14) | Ballast policy options B and C in 5.5.4 are legal. |
+| 8 | T5.4 | Chamber angle relative to the track surface, −3° to +3°, measured with a full cartridge in and the car on its wheels. (p.26) | With unequal front and rear wheel radii the car pitches; include that pitch in the angle. |
+| 9 | T7.13 | A 100 g weight hung from each wheel with a three-finger claw; the claw's lip is 1.5 × 1.5 mm; minimum clearance from the wheel's inner corner to the body. (p.34) | Matches the code's claw model. |
+| 10 | T4.4.5 | Halo safety test: car supported on a cartridge in its chamber; 1 kg suspended to give a 2 kg loading at the notch ("to be reviewed"). (p.24) | Use 2 kg (19.6 N) at the notch in `phys_halo_load`. The tether-guide pull and other tests: read their pages before writing their checks. |
+| — | T5.5 | 3.0 mm of Model Block around the **minimum** chamber depth (45 mm, T5.3); the chamber's whole circumference and depth must not be intersected by any object. T1.4: the chamber is bounded around its circumference and at its forward end by the body only. (p.26, p.8) | Side wall ≥ 3.0 mm over at least the first 45 mm from the opening (checking the whole bore is stricter and fine). Forward end: body only, any thickness; report its thickness and keep a design minimum of 1.0 mm. |
+| — | T1.13 | Hand finishing (abrasive paper) may only remove the irregularities left by CNC machining; keep it to a minimum. (p.11) | Sanding is not a shaping tool: `sanding_loss_mm` should stay small (Part 3 M10), and Stage D's skin perturbation in Part 7 models that loss, not reshaping. |
+| — | T3.5 / T5.2 | Height and chamber height are measured with a full cartridge inserted, car on its wheels. (p.19, p.26) | The cartridge's protruding end counts toward height. |
+
 ## 5.2 One source of regulation numbers: `regs.py`
 
-Today regulation numbers live in three places: `part4-simulation/component_contract.py` (Part 4's), `part5-simulation/legality.py` (`REGS` dict) and `part1-simulation/geometry_contract.py` (mixed with design choices). Two sources of truth drift (F38).
+Today regulation numbers live in three places: `components/component_contract.py` (Part 4's), `car/legality.py` (`REGS` dict) and `body/geometry_contract.py` (mixed with design choices). Two sources of truth drift (F38).
 
-Create `part1-simulation/regs.py` (repo folder `part1-simulation` is already on every module's path). It holds **only regulation limits**, each with its rule number. Design choices (chamber axis at 31 mm, grid spacing, densities) stay in `geometry_contract.py`.
+Create `body/regs.py` (folder `body` is already on every module's path). It holds **only regulation limits**, each with its rule number. Design choices (chamber axis at 31 mm, grid spacing, densities) stay in `geometry_contract.py`.
 
 ```python
 """regs.py -- every number from the STEM Racing UAE Professional Class Technical
@@ -149,7 +176,7 @@ Then:
 1. `component_contract.py`: replace every regulation literal with `from regs import ...`. Keep its helper functions (`ref_plane_A`, `ref_plane_B`).
 2. `legality.py`: delete the `REGS` dict; import from `regs`.
 3. `geometry_contract.py`: replace regulation literals with imports from `regs`; leave design choices.
-4. Add `part1-simulation/tests/test_regs.py`: grep the code for any of the regulation literals (`48.0`, `65.0`, `85.0`, `1.5`, `223.0`, …) appearing next to a rule comment outside `regs.py`, and fail if found. This keeps the single source single.
+4. Add `body/tests/test_regs.py`: grep the code for any of the regulation literals (`48.0`, `65.0`, `85.0`, `1.5`, `223.0`, …) appearing next to a rule comment outside `regs.py`, and fail if found. This keeps the single source single.
 
 ---
 

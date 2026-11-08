@@ -1,5 +1,8 @@
 # Part 3 — Physical measurements (the team measures, the agent guides and processes)
 
+> **Status on 2026-11-08 (branch `rebuild/bible`). Owner: chat A.** Processing scripts (`measure/`) and `inputs/measured.json` done and tested on synthetic data. Not yet done: every lab experiment (team work), the lab sheets, processing real data.
+> See `status/` for live progress and `agents/` for the chat prompts.
+
 Read `00_START_HERE.md` first. This Part replaces every guessed physical input with a measured one. It is the highest-value work in the whole project: today the race model runs on a synthetic thrust curve with about 60% of a real cartridge's impulse, an unmeasured rolling coefficient, an unmeasured foam density and no tether term. No amount of CFD can fix a wrong input.
 
 The agent cannot take measurements. The agent's job here is to:
@@ -117,7 +120,7 @@ The race model's single biggest input. The current curve is synthetic (it even c
 
 ### 3.4.2 What to build: the cartridge holder
 
-- A rigid holder with a bore exactly like the car's chamber: **18.15 mm diameter, 52 mm deep** (the values in `part1-simulation/geometry_contract.py`, `MODEL_BLOCK_BORE_DIA_MM` and `MODEL_BLOCK_BORE_DEPTH_MM`). The cartridge must sit in it exactly as in the car so the gas exits the same way. Best: mill it from a spare Model Block offcut with the official pre-bored hole. Acceptable: SLS PA12 or aluminium.
+- A rigid holder with a bore exactly like the car's chamber: **18.15 mm diameter, 52 mm deep** (the values in `body/geometry_contract.py`, `MODEL_BLOCK_BORE_DIA_MM` and `MODEL_BLOCK_BORE_DEPTH_MM`). The cartridge must sit in it exactly as in the car so the gas exits the same way. Best: mill it from a spare Model Block offcut with the official pre-bored hole. Acceptable: SLS PA12 or aluminium.
 - The holder pushes forward on the force sensor along the cartridge axis. The cartridge's rear (neck) faces the launch pod's striker, as in a race.
 - The holder must **not slide**: it is bolted to the sensor, and the sensor is bolted to a heavy base (at least 5 kg, clamped to a bench). A forward stop behind the sensor prevents overload damage.
 - The axis must be horizontal and aligned with the sensor's measuring axis within 2° (check with a phone inclinometer app).
@@ -168,7 +171,7 @@ Writes  --out: columns "time (s)", "force (N)", "mass (kg)" on a 0.5 ms grid fro
         where "mass (kg)" is the PROPELLANT still on board (charge x (1 - impulse so far / total)).
         <dir>/summary.json: per run peak, time to peak, impulse, duration, ringing frequency;
         ensemble mean and standard deviation of impulse and peak.
-The race model (part2-simulation/race_objective.py) reads the three columns by name.
+The race model (race_objective.py (retired in Part 4)) reads the three columns by name.
 """
 from __future__ import annotations
 
@@ -520,7 +523,7 @@ Test: synthetic runs from known R0 = 0.004 N, μ = 0.008 with 2 mm position nois
 
 1. Weigh each wheel (with its bearing fitted, as raced) to 0.001 g if possible, else 0.01 g.
 2. Weigh a bearing alone (M6).
-3. The code computes each wheel's inertia from its STL and PA12 density (`part4-simulation/wheel.py`, `design()`), plus 0.45 × bearing mass × (outer race radius)² for the bearing.
+3. The code computes each wheel's inertia from its STL and PA12 density (`components/wheel.py`, `design()`), plus 0.45 × bearing mass × (outer race radius)² for the bearing.
 4. Scaled inertia = CAD inertia (wheel part only) × (measured wheel mass − bearing mass) / (CAD wheel mass) + bearing term. This assumes the printed density is uniform, which SLS PA12 nearly is.
 
 ### 3.9.2 Method B (optional, checks Method A): trifilar pendulum
@@ -608,7 +611,7 @@ Initial file (the agent writes this at the start of Part 3, with the code's curr
 
 | Key | Initial value | Unit | Measured by |
 |---|---|---|---|
-| `thrust_csv` | `"part2-simulation/co2_thrust_data.csv"` | path | M1 |
+| `thrust_csv` | `"race/co2_thrust_data.csv"` | path | M1 |
 | `impulse_Ns` | 1.214 | N·s | M1 |
 | `peak_N` | 8.52 | N | M1 |
 | `trigger_delay_ms` | 0 | ms | M1 |
@@ -658,7 +661,7 @@ Write `sanding_loss_mm`, `tool_stickout_mm`, `holder_diameter_mm`, and feature r
 
 ## 3.15 M11 — Print fit coupon
 
-Print (SLS PA12, as for the real parts) a coupon with five plugs of the same nominal size and five pockets milled in foam with clearances 0.05, 0.10, 0.15, 0.20, 0.30 mm per side (the agent generates the STLs and the milling geometry from `part4-simulation/joints.py` with `GLUE_GAP_MM` set to each value). Also print three stub axles at the code's diameter and test the bearing press fit.
+Print (SLS PA12, as for the real parts) a coupon with five plugs of the same nominal size and five pockets milled in foam with clearances 0.05, 0.10, 0.15, 0.20, 0.30 mm per side (the agent generates the STLs and the milling geometry from `components/joints.py` with `GLUE_GAP_MM` set to each value). Also print three stub axles at the code's diameter and test the bearing press fit.
 
 Record which clearance gives a firm hand fit with room for glue, and whether the bearings press on without cracking the stub. Write `glue_gap_mm` and a note on stub sizing.
 

@@ -1,5 +1,8 @@
 # Part 6 — The CFD stopwatch: low-noise drag measurement
 
+> **Status on 2026-11-08 (branch `rebuild/bible`). Owner: chat C.** `cfd/morph.py` exists: the Laplacian solver and the points file reader/writer are tested on small cases. Everything else not started.
+> See `status/` for live progress and `agents/` for the chat prompts.
+
 Read `00_START_HERE.md` first. This Part turns the CFD from a noisy stopwatch (σ ≈ 1 ms model, from remeshing) into one that can resolve the differences the search is looking for, and establishes how far its numbers can be trusted.
 
 The core idea: **the noise comes from remeshing, so stop remeshing between neighbouring designs.** Build one high-quality base mesh per "family" of cars, then deform (morph) that mesh to each nearby candidate, warm-start from the base solution, and compare candidate and base on meshes with identical topology. For designs too far apart to morph, mesh fresh, but with every meshing input pinned to a fixed frame so the only remaining noise is surface snapping.
@@ -25,7 +28,7 @@ Then compute 2. Record in `STATUS.md`.
 
 ## 6.1 What exists today (facts to start from)
 
-All in `part2-simulation/openfoam_case.py` and `cfd_wrapper.py` unless stated.
+All in `cfd/openfoam_case.py` and `cfd_wrapper.py` unless stated.
 
 - ESI OpenFOAM v2412. Stages: `surfaceFeatureExtract` → `blockMesh` → `snappyHexMesh -overwrite` (serial) → `checkMesh` → `decomposePar` → `mpirun -np 4 simpleFoam -parallel` → `reconstructPar -latestTime`.
 - Half car, symmetry plane at y = 0 (`symmetryPlane`), ground `lowerWall` at z = 0 moving at U (`fixedValue (U 0 0)`), inlet `fixedValue`, outlet `inletOutlet`, car `noSlip`, wheels `rotatingWallVelocity` with ω = −U/R about the axle (sign verified: the bottom of the wheel moves with the ground), other parts as separate wall patches.
@@ -56,7 +59,7 @@ Today the frame is derived from each car's Ref A and Ref B, so a change of wheel
 
 Fix: one **global** frame for every car in the legal layout range.
 
-- Layout ranges (from `part5-simulation/space.py`, formerly `pattern.LAYOUT`): x_front 46-56 mm, W 120.3-140 mm.
+- Layout ranges (from `car/space.py`, formerly `pattern.LAYOUT`): x_front 46-56 mm, W 120.3-140 mm.
 - Ref A ranges 30-40 mm; the nose reaches at most 40 mm ahead (T8.2), so the most forward point is at x ≥ −10 mm.
 - Ref B ranges up to 56 + 140 + 16 = 212 mm; the rear wing overhangs at most 40 mm (T9.4.2): x ≤ 252 mm.
 - Global frame: x from −11 mm to 253 mm; y from 0 to 43.5 mm; z from 0 to 66 mm. Put it in `geometry_contract.py` as `CFD_FRAME_MM = ((-11.0, 0.0, 0.0), (253.0, 43.5, 66.0))` and use it in `run_car.make_bindings` for every car.
@@ -117,7 +120,7 @@ Batch size: 5 configurations × (8 + 3) = 55 screen-tier cars + 3 fine reference
 - `feature_snap_body`: bool, default True;
 - `stl_decimate`: bool, default True.
 
-Each key needs one unit test in `part2-simulation/tests/test_openfoam_case.py` checking the dictionary text it produces.
+Each key needs one unit test in `cfd/tests/test_openfoam_case.py` checking the dictionary text it produces.
 
 ---
 
@@ -159,7 +162,7 @@ For each car-part patch P (`car`, `wheelF`, `wheelR`, `supports`, `halo`, `fwing
 - Points shared by two patches (where a part meets the body): compute both displacements; if they differ by more than 0.05 mm, record it; use their mean.
 - Non-car patches: inlet, outlet, top, side → fixed (zero displacement). `symmetry` → y-component fixed at 0, x and z free. `lowerWall` → z-component fixed at 0, x and y free (the wheels' contact patches can slide along the ground).
 
-### 6.5.4 Interior point displacements (`part2-simulation/morph.py`)
+### 6.5.4 Interior point displacements (`cfd/morph.py`)
 
 Solve, for each displacement component c separately, a weighted graph Laplacian over the mesh's point-edge graph:
 
@@ -418,7 +421,7 @@ The CO2 jet (a supersonic-start, then subsonic CO2 jet from the cartridge during
 
 ---
 
-## 6.10 New worker kinds (`tools/worker.py`)
+## 6.10 New worker kinds (`compute/worker.py`)
 
 | Kind | Inputs in the case | Does | Returns |
 |---|---|---|---|
