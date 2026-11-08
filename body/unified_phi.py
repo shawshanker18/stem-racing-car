@@ -781,7 +781,10 @@ def build_rule_masks(geom: "UnifiedGeometry"):
     from halo_pocket import compute_halo_pocket_box_m
     r, d = geom.region, GRID_SPACING_M
     xs = (r.origin_m[0] + np.arange(r.shape[0]) * d) * 1e3
-    ys = (r.origin_m[1] + np.arange(r.shape[1]) * d) * 1e3
+    # Rounded so +y and -y cells compare equal against the rule limits below: unrounded,
+    # |y| at the same distance either side differed in the last bit and the nose stub
+    # (|y| <= 4.0) kept a column on one side only (test_masks_and_labels_are_exactly_symmetric).
+    ys = np.round((r.origin_m[1] + np.arange(r.shape[1]) * d) * 1e3, 6)
     zs = (r.origin_m[2] + np.arange(r.shape[2]) * d) * 1e3
     X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
     x_ref_a = geom.landmarks["ref_plane_A_m"] * 1e3

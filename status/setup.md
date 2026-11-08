@@ -23,10 +23,11 @@ Updated: 2026-11-08
 
 ## Test evidence (local, Windows, Python 3.13, `docker/requirements.lock`)
 - race 19 passed; cfd 94 passed; components 15 passed; car 13 passed (includes a whole car built
-  end to end); measure 8 passed; compute 2 passed; body: see the final line below.
+  end to end); measure 8 passed; compute 2 passed; body 177 passed (after the symmetry fix below).
 
 ## Blocked on people
 - Everything in Part 3 (lab measurements) and the Part 4 validation (timed runs of a real car).
 
 ## Gate
 - [x] Part 2 exit gate (except "pull request merged by the user": the base branch is open as a PR).
+- Fixed a test that already failed on the original code: `body/unified_phi.py` build rules used unrounded y coordinates, so the nose stub kept a column on one side only (`test_masks_and_labels_are_exactly_symmetric`). Golden G1 unchanged.
