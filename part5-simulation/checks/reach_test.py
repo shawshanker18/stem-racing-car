@@ -25,29 +25,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import paths  # noqa: E402,F401
 import param_body as pb  # noqa: E402
-import pattern  # noqa: E402
+import space  # noqa: E402
 
 X_REF_A, X_REAR = 30.0, 222.3
-BODY = pattern.LOFT + [f"mode{i}" for i in range(pb.N_MODES)]
+BODY = space.LOFT + [f"mode{i}" for i in range(pb.N_MODES)]
 
 
 def to_params(v: np.ndarray) -> pb.BodyParams:
     d = {"params": pb.BodyParams().as_dict(), "parts": {}}
     for name, x in zip(BODY, v):
-        d = pattern.put(d, name, float(x))
+        d = space.put(d, name, float(x))
     return pb.BodyParams.from_dict(d["params"])
 
 
 def start_vector() -> np.ndarray:
     d = {"params": pb.BodyParams().as_dict(), "parts": {}}
-    return np.array([pattern.get(d, n) for n in BODY])
+    return np.array([space.get(d, n) for n in BODY])
 
 
 def fit(points_mm: np.ndarray, skin_mm: float = 0.0) -> dict:
     """The settings whose drawn surface comes closest to these points."""
     X, Y, Z = points_mm.T
-    lo = np.array([pattern.bounds(n)[0] for n in BODY])
-    hi = np.array([pattern.bounds(n)[1] for n in BODY])
+    lo = np.array([space.bounds(n)[0] for n in BODY])
+    hi = np.array([space.bounds(n)[1] for n in BODY])
 
     def residual(u):                 # phi is a distance in mm, zero on the surface
         return pb.phi_mm(to_params(u[:-1]), X, Y, Z, X_REF_A, X_REAR) - u[-1]

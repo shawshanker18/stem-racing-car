@@ -1204,6 +1204,19 @@ def extract_unified_surface(
     return mesh, report
 
 
+try:
+    from physics_contract import ComponentMassCOM  # Part 2's canonical record type
+except ImportError:                                 # Part 1 on its own, without Part 2 on the path
+    @dataclass(frozen=True)
+    class ComponentMassCOM:  # type: ignore[no-redef]
+        """Fields must match part2-simulation/physics_contract.ComponentMassCOM."""
+        name: str
+        mass_kg: float
+        com_x_m: float
+        com_y_m: float
+        com_z_m: float
+
+
 def compute_mass_com(geom: UnifiedGeometry) -> list:
     """Per-component ComponentMassCOM from the one field, via labels.
 
@@ -1216,7 +1229,6 @@ def compute_mass_com(geom: UnifiedGeometry) -> list:
       - No sidepod doubling. The old code computed a right-half sidepod and
         multiplied its mass by 2; here both sidepods are actual cells.
     """
-    from mass_com_calculator import ComponentMassCOM
 
     dx = GRID_SPACING_M
     ox, oy, oz = geom.region.origin_m

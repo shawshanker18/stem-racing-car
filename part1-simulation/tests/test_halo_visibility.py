@@ -57,26 +57,23 @@ def _obstructed(halo, solid, axis, viewer_positive):
 
 
 def _carved_car(n_iters=10):
+    """The start field, eroded n_iters times by a quarter cell (a uniform inward move, then
+    redistanced): a body the build rules have to keep the halo visible on. Was ten
+    Hamilton-Jacobi steps of the retired carving loop with the mass term only, which on an
+    empty sensitivity is the same uniform erosion."""
     import coarse
     coarse.use_spacing(2.0)
-    import phi_updater as pu
-    from unified_phi import build_unified_geometry
+    from geometry_contract import GRID_SPACING_M
+    from sdf import reinitialise_sdf
+    from unified_phi import build_unified_geometry, enforce_symmetry
 
     geom = build_unified_geometry(120.0, 36.0, 20.0, init_mode="full",
                                   with_cargo=False)
-    grads = {"dT_dD20": 0.4618, "dT_dmass": 17.042, "dT_dh_com": 0.0,
-             "dT_dx_com": 0.0, "dT_dL": 0.0}
-
-    class _MR:
-        total_mass_kg, com_x_m, com_z_m = 0.1494, 0.122, 0.0296
-
-    w = {"w_aero": 1.0, "w_mass": 1.0, "w_com": 0.0, "w_mfg": 0.0}
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        for _ in range(n_iters):
-            pu.apply_adjoint_to_unified(
-                geom, np.zeros(0), SimpleNamespace(vertices=np.zeros((0, 3))),
-                0.5, w, grads, _MR())
+    for _ in range(n_iters):
+        geom.phi.grid[...] = geom.phi.grid + 0.25 * GRID_SPACING_M
+        geom.phi.apply_hard_constraints()
+        reinitialise_sdf(geom.phi, n_steps=3)
+        enforce_symmetry(geom)
     return geom
 
 

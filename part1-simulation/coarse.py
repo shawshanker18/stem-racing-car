@@ -22,7 +22,6 @@ _SPACING_CONSUMERS = (
     "bounding_volumes",
     "fixed_hardware",
     "halo_pocket",
-    "mass_com_calculator",
     "phi_grid",
     "sdf",
     "surface_extraction",

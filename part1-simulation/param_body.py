@@ -23,7 +23,7 @@ Shape, all in mm, car coordinates (x nose->tail, z up from the track):
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict, fields, replace
+from dataclasses import dataclass, asdict, fields
 import numpy as np
 
 
@@ -221,14 +221,11 @@ def mode_field(bp, X, Y, Z, x_ref_a, x_rear):
 
 def build(W_mm: float, x_front_mm: float, d_halo_mm: float, bp: BodyParams,
           target_body_kg: float | None = None, machinable: bool = True,
-          skin_offset_mm: float | None = None, field_mm=None):
+          skin_offset_mm: float | None = None):
     """UnifiedGeometry whose body is `bp`, with every rule mask applied.
 
-    field_mm: a body given as a signed distance field on this car's grid (mm, negative
-      inside), e.g. one carved from the block, used instead of `bp`'s loft. It goes through
-      the same rules, machining, joins and mass sizing (the skin offset grows or thins it).
-
-    machinable: the team's 3-axis, 6.25 mm ball-end, top-and-bottom process
+    machinable: the team's 3-axis, 6.25 mm ball-end process from four sides (top, bottom,
+      left, right)
       (machining.make_machinable) is applied to the drawn shape.
     target_body_kg: no ballast, so the body itself carries the mass the T3.6
       floor needs. The drawn shape is offset by a uniform skin (grown or
@@ -247,17 +244,9 @@ def build(W_mm: float, x_front_mm: float, d_halo_mm: float, bp: BodyParams,
     X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
     x_ref_a = base.landmarks["ref_plane_A_m"] * 1e3
     x_rear_mm = base.landmarks["rear_face_m"] * 1e3
-    if field_mm is not None:
-        if np.shape(field_mm) != X.shape:
-            raise ValueError(f"field_mm has shape {np.shape(field_mm)}, this car's grid is {X.shape}")
-        # The machined body ends at Ref A: ahead of it is the printed nose cone (T1.7).
-        phi0 = np.maximum(np.asarray(field_mm, dtype=float), x_ref_a - X)
-        bp = replace(bp, ft_h=0.0)                 # the field is the whole body: no loft tunnel
-    else:
-        phi0 = phi_mm(bp, X, Y, Z, x_ref_a, x_rear_mm)
+    phi0 = phi_mm(bp, X, Y, Z, x_ref_a, x_rear_mm)
     # The rules every body obeys (Ref A end, T8.5.1 cap, nose stub, halo floor and pocket
-    # bridge) are forced in build_unified_geometry (unified_phi.apply_build_rules), so a
-    # carved body gets them too. The stub's section is reused below to join a split front.
+    # bridge) are forced in build_unified_geometry (unified_phi.apply_build_rules). The stub's section is reused below to join a split front.
     stub = (np.abs(Y) <= 4.0) & (Z >= 9.0) & (Z <= 18.0)
 
     def make(offset_mm, bar_to=None, bridges=None):

@@ -72,54 +72,6 @@ def test_wheels_are_placed_in_car_coordinates():
     assert abs(b[1, 2] - 2 * R_WHEEL_M * 1e3) < 0.3
 
 
-def test_vectorised_splat_matches_a_loop():
-    from coarse import use_spacing
-    use_spacing(2.0)
-    try:
-        import phi_updater as pu
-        from bounding_volumes import BoundingRegion
-        from phi_grid import PhiGrid
-        reg = BoundingRegion("car", (0.0, -0.01, 0.0), (10, 11, 12))
-        z = np.zeros(reg.shape, np.float32)
-        phi = PhiGrid("car", reg, z, np.zeros(reg.shape, bool), np.zeros(reg.shape, bool))
-        rng = np.random.default_rng(1)
-        v = rng.uniform([0, -0.01, 0], [0.02, 0.012, 0.024], (500, 3))
-        s = rng.normal(size=500)
-        got = pu._splat_vertex_sensitivity_to_grid(s, v, phi)
-        ref = np.zeros(reg.shape); cnt = np.zeros(reg.shape)
-        for (x, y, zz), val in zip(v, s):
-            i, j, k = (int(round((x - 0) / 2e-3)), int(round((y + 0.01) / 2e-3)),
-                       int(round(zz / 2e-3)))
-            if 0 <= i < 10 and 0 <= j < 11 and 0 <= k < 12:
-                ref[i, j, k] += val; cnt[i, j, k] += 1
-        ref[cnt > 0] /= cnt[cnt > 0]
-        assert np.allclose(got, ref)
-    finally:
-        use_spacing(0.3)
-
-
-def test_hj_substeps_never_split_the_body():
-    """Regression 2026-09-26: six sub-steps per adjoint left 3 field bodies
-    (T4.1). A uniform erosion far past the trust radius must not add a body."""
-    from coarse import use_spacing
-    use_spacing(2.0)
-    try:
-        import param_body as pb
-        import phi_updater as pu
-        import unified_phi as up
-        from scipy.ndimage import label
-        g = pb.build(120.3, 46.0, 43.72, pb.BodyParams())
-        half = up.extract_half_surface(g)
-        n0 = label(g.phi.grid < 0)[1]
-        sens = np.ones(len(half.vertices))      # descent = shrink everywhere
-        pu.apply_adjoint_to_unified(
-            g, sens, half, 1.0, {"w_aero": 1.0, "w_mass": 0.0},
-            {"dT_dmass": 0.0, "dT_dh_com": 0.0, "dT_dx_com": 0.0},
-            {"total_mass_kg": 0.07, "com_x_m": 0.14, "com_z_m": 0.02},
-            max_substeps=40, trust_radius_m=0.05)
-        assert label(g.phi.grid < 0)[1] <= n0
-    finally:
-        use_spacing(0.3)
 
 
 def test_param_body_is_one_legal_piece():

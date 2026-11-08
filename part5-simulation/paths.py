@@ -4,8 +4,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PARTS = {n: ROOT / n for n in ("part1-simulation", "part2-simulation", "part3-simulation",
-                               "part4-simulation")}
+PARTS = {n: ROOT / n for n in ("part1-simulation", "part2-simulation", "part4-simulation")}
 
 
 def add_parts() -> None:

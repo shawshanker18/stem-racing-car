@@ -1,33 +1,22 @@
 """
-pipeline_interface.py — Part 3 Stage 2: the Part 1 / Part 2 handshake layer.
+pipeline.py -- the four steps run_car needs between the geometry and the race time:
+quality-gated CFD-ready STL, mass report, CFD solve, race objective.
 
-Part 3 never imports Part 1 or Part 2 modules directly from loop code.
-All external calls go through a PipelineBindings object so that:
-
-  1. The exact interface Part 3 depends on is written down in ONE place
-     (mirroring "Section 16 — Part 2 Interface Contract" of the Part 1 spec).
-  2. Tests can inject fakes and exercise the whole optimizer without
-     OpenFOAM, JAX, trimesh, or the real φ grids.
-  3. Every not-yet-wired integration fails LOUDLY (house Rule 8) instead
-     of silently returning garbage.
-
-unified_bindings() constructs the production wiring against the actual
-part1_geometry/ and part2_simulation/ packages.
+Copied from part3-simulation/pipeline_interface.unified_bindings (commit 3332323) when the
+carving loop and repo folder part3-simulation were retired (bible Part 2, docs/HISTORY.md).
+The carving-only bindings (initial field, adjoint weight, adjoint, level-set update,
+candidate records) were dropped.
 """
 
 from __future__ import annotations
 
 import os
-import sys
 import warnings
-from dataclasses import dataclass, fields
-from typing import Any, Callable, Optional
+from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import Optional
 
-
-# Names Part 1 uses for the four φ grids; Part 2's candidate record requires
-# exactly these keys for phi_grid_snapshot_paths.
-PHI_COMPONENT_NAMES = ("nose", "sidepod", "rearpod", "main_body")
-
+import paths  # noqa: F401  -- part1/2/4 on sys.path
 
 @dataclass(frozen=True)
 class GateOutcome:
@@ -146,92 +135,6 @@ class MassReport:
                 (w * self.com_z_m + p * pz) / m)
 
 
-@dataclass(frozen=True)
-class AdjointOutcome:
-    """One adjoint solve: the surface sensitivity AND the mesh indexing it.
-
-    These two are inseparable and must travel together. `sensitivity[i]` is
-    dObjective/dSurface at `half_mesh.vertices[i]`; the array alone carries no
-    information about which point each value belongs to.
-
-    Keeping them apart produced the pipeline's longest-lived silent failure:
-    inner_loop had only the sensitivity, so it reached for the nearest
-    mesh-shaped object in scope -- `gate.meshes`, a dict[str, Trimesh] keyed by
-    component. A dict has no `.vertices`, so the phi update raised
-    AttributeError on the first real iteration, the loop's broad `except`
-    caught it, and every iteration was quietly downgraded to
-    "objective_failed" with phi never updated once.
-
-    half_mesh may be None only for test doubles whose update_phi ignores it.
-    """
-
-    sensitivity: Any
-    half_mesh: Any
-
-
-@dataclass
-class PipelineBindings:
-    """Every callable Part 3 needs from the rest of the system.
-
-    All fields are REQUIRED (no defaults) so a partially wired binding set
-    fails at construction, not mid-optimization.
-
-    Signatures (duck-typed; validate_bindings checks presence/callability):
-
-      initialize_phi_fields(W_mm, x_front_mm, d_halo_mm, seed) -> dict[name, phi_grid]
-          Fresh random-legal φ fields for all four components.
-      run_quality_gates(phi_grids, candidate_id, out_dir) -> GateOutcome
-      compute_mass_report(phi_grids) -> MassReport
-          φ volume integrals + fixed hardware rollup (Part 1 S5 + Part 2 S2).
-      run_cfd(stl_half_path) -> CFDOutcome
-          Half-car CFD, converted to full-car values before returning.
-      evaluate_objective(D20, L, m_total, h_com, x_com, mu, wheel_moi) ->
-          ObjectiveOutcome
-      compute_adjoint_weight(...same args...) -> float          (w_D20, s/N)
-      run_adjoint(stl_half_path, objective_weight) -> AdjointOutcome
-          Right-half surface sensitivity dObjective/dSurface, together with
-          the half-car mesh that defines its vertex ordering.
-      update_phi(phi_grids, sensitivity_field, half_mesh, dt, weights,
-                 objective_gradients, mass_report) -> None (in place)
-      write_candidate_record(outcome_dict) -> record_path (str)
-    """
-
-    initialize_phi_fields: Callable[..., dict]
-    run_quality_gates: Callable[..., GateOutcome]
-    compute_mass_report: Callable[..., MassReport]
-    run_cfd: Callable[..., CFDOutcome]
-    evaluate_objective: Callable[..., ObjectiveOutcome]
-    compute_adjoint_weight: Callable[..., float]
-    run_adjoint: Callable[..., Any]
-    update_phi: Callable[..., None]
-    write_candidate_record: Callable[..., str]
-
-
-def validate_bindings(bindings: PipelineBindings) -> None:
-    """Raise TypeError if any binding is missing or not callable."""
-    for f in fields(PipelineBindings):
-        value = getattr(bindings, f.name, None)
-        if not callable(value):
-            raise TypeError(
-                f"PipelineBindings.{f.name} must be callable, got {value!r}"
-            )
-
-
-# ---------------------------------------------------------------------------
-# Production wiring
-# ---------------------------------------------------------------------------
-
-
-def _add_sibling_packages_to_path() -> None:
-    here = os.path.dirname(os.path.abspath(__file__))
-    root = os.path.dirname(here)
-    # Support both the spec/internal package names and the actual local repo
-    # folder names used beside this repository.
-    for pkg in ("part1_geometry", "part2_simulation", "part1-simulation", "part2-simulation",
-                "part4-simulation"):
-        p = os.path.join(root, pkg)
-        if p not in sys.path:
-            sys.path.insert(0, p)
 
 
 # Triangle budget for the half-car STL handed to OpenFOAM.
@@ -260,9 +163,7 @@ STL_TRIANGLE_BUDGET = 120_000
 
 # Re-exported so the decimation warning can name the envelope it failed. One
 # source of truth: surface_extraction owns these, set from real solver runs.
-# Module-level import of a Part 1 module: the sibling path must be set FIRST,
-# or importing this module fails outright (it did, in 2 of 8 CI test files).
-_add_sibling_packages_to_path()
+# (paths, imported at the top, has put part1-simulation on sys.path.)
 from surface_extraction import (  # noqa: E402
     MEASURED_SAFE_MIN_ANGLE_DEG, MEASURED_SAFE_SLIVER_FRACTION,
 )
@@ -419,91 +320,25 @@ def _decimate_for_cfd(mesh, budget: int = STL_TRIANGLE_BUDGET, _max_backoffs: in
     return _snap_symmetry_plane(mesh)
 
 
-def unified_bindings(
+
+def bindings(
     thrust_csv_path: str,
-    fixed_hardware_kwargs,          # dict, or callable(W_mm) -> dict
+    fixed_hardware_kwargs,          # dict, or callable(W_mm, x_front_mm, d_halo_mm) -> dict
     out_dir: str,
     cfd_kwargs: Optional[dict] = None,
-    adjoint_kwargs: Optional[dict] = None,
     stl_triangle_budget: int = STL_TRIANGLE_BUDGET,
-    cargo_placement: Optional[dict] = None,
-    seed_geometry=None,
-    ballast_material: Optional[str] = "lead",
-    hj_max_substeps: int = 6,
-    hj_trust_radius_m: float = 1.0e-3,
-    hj_aero_smooth_m: float = 0.0,
-) -> PipelineBindings:
-    """Bind Part 3 to the UNIFIED single-field geometry + the real objective.
+    ballast_material: Optional[str] = None,
+):
+    """The four bindings run_car uses. cfd_kwargs go to Part 2's run_half_car_cfd verbatim."""
+    from unified_phi import compute_mass_com, extract_half_surface, extract_unified_surface
+    from cfd_wrapper import run_half_car_cfd
+    from mass_com_ingest import FixedHardwareSpec, ingest_mass_com
+    from race_objective import build_smooth_sheet_model
+    from race_objective_adapter import race_value_and_grad_guarded
+    import numpy as np
 
-    2026-09-25 additions:
-      ballast_material   legal ballast in the capsule under the halo
-                         (Part 1 ballast.py). None disables it.
-      hj_max_substeps,   sub-steps per adjoint and their trust radius; measured
-      hj_trust_radius_m  9x more surface motion per CFD solve (rnd/step_size).
-      cfd_kwargs["extra_surfaces"] / adjoint_kwargs["extra_surfaces"] put the
-                         wheels, supports, halo and wings (Part 4) in the CFD.
-
-    The CFD, race-objective and adjoint bindings. The
-    geometry pipeline is the single labelled level set (unified_phi), not the
-    four-grid path. That fixes what the four-grid path could not:
-
-      * geometry is ONE connected watertight body, so the quality gate passes
-        (the four-grid path fails on tool accessibility and disconnected slabs);
-      * the drag adjoint and the real objective gradients evolve one field, so
-        material can move across former component seams;
-      * `phi_grids` handed around the inner loop is a UnifiedGeometry object
-        (the loop treats it opaquely, so this is contract-compatible).
-
-    The only thing still stubbed after this is the OpenFOAM binary: run_cfd /
-    run_adjoint shell out to it.
-
-    cfd_kwargs / adjoint_kwargs are forwarded verbatim to Part 2's
-    run_half_car_cfd / run_half_car_adjoint. Before 2026-07-24 both were called
-    with ALL defaults, so `n_subdomains` was pinned to 1 (every solve
-    single-core, on a 360 GB box), `keep_run_dir` to False (logs deleted on the
-    failure path), and resolution/iteration caps were unreachable — which made
-    a cheap smoke run impossible to configure. Typical smoke values:
-        cfd_kwargs={"resolution": "coarse", "max_iterations": 300,
-                    "n_subdomains": 8, "keep_run_dir": True}
-        adjoint_kwargs={"resolution": "coarse", "primal_iters": 200,
-                        "adjoint_iters": 200, "keep_run_dir": True}
-    """
-    _add_sibling_packages_to_path()
     cfd_kwargs = dict(cfd_kwargs or {})
-    adjoint_kwargs = dict(adjoint_kwargs or {})
 
-    try:
-        from unified_phi import (
-            build_unified_geometry, enforce_symmetry, extract_unified_surface,
-            compute_mass_com, extract_half_surface, remap_geometry,
-        )
-        from phi_updater import apply_adjoint_to_unified
-    except ImportError as exc:
-        raise ImportError(
-            "unified_bindings requires part1 unified_phi + phi_updater. "
-            f"Cause: {exc}"
-        ) from exc
-    try:
-        from cfd_wrapper import run_half_car_cfd, run_half_car_adjoint  # noqa: F401
-        from mass_com_ingest import FixedHardwareSpec, ingest_mass_com
-        from race_objective import build_smooth_sheet_model
-        from race_objective_adapter import race_value_and_grad_guarded
-        from adjoint_contract import compute_adjoint_objective_weight
-        from candidate_record import CandidateRecord, write_candidate_record
-        import numpy as np
-    except ImportError as exc:
-        raise ImportError(
-            f"unified_bindings requires part2_simulation/ on the path. Cause: {exc}"
-        ) from exc
-
-    # Geometry-dependent, and BOTH sweep axes move it. The rear axle sits at
-    # x_front + W, so the rear wheel/axle COM follows W; the canister COM and
-    # rear-wing COM come off bounding volumes that depend on d_halo. Building
-    # one spec here froze the whole fixed-hardware layout at whatever (W,
-    # d_halo) the caller happened to pass -- run_optimization pinned W=130 while
-    # sweeping W, run_two_stage pinned d_halo=20.0 while sweeping d_halo. So
-    # accept a callable with default_fixed_hardware_kwargs' own signature and
-    # re-derive per geometry.
     if callable(fixed_hardware_kwargs):
         _build_fh = fixed_hardware_kwargs
     else:
@@ -533,44 +368,6 @@ def unified_bindings(
     def _params(D20, L, m_total, h_com, x_com, mu, wheel_moi):
         return np.array([D20, m_total, mu, wheel_moi, 1.0, h_com, L, x_com],
                         dtype=np.float64)
-
-    # Stage 1 scores cargo position AND fore-aft flip against the real
-    # com_x-aware race objective (stage1_search.make_race_objective_cargo_scorer)
-    # — the proxy cannot rank cargo because it has no com_x term. That choice
-    # only means something if Stage 2 BUILDS with it. Before this was threaded
-    # through, build_unified_geometry was called without cargo_placement, so
-    # every Stage-2 car silently reverted to the geometric default
-    # (corridor-centre, wide-forward) and the flip DOF was dead.
-    def initialize_phi_fields(W_mm, x_front_mm, d_halo_mm, seed):
-        # SEEDED from Stage 1's carved field when one is supplied.
-        #
-        # Stage 1 carves every candidate 30 steps toward the T3.6 floor to rank
-        # it, with no CFD at all, and that shape used to be discarded -- so
-        # Stage 2 rebuilt from the 150 g envelope and re-descended the same
-        # curve at roughly 55 minutes per iteration. It was affordable only
-        # because redistancing was eroding the body and doing most of the
-        # carving for free; with reinitialise_sdf fixed, the descent measures
-        # ~150 iterations at production spacing, about six days per d_halo.
-        #
-        # Seeding also makes the cross-d_halo comparison FAIR, which the
-        # warm-start chain does not: every d_halo now begins from the same
-        # Stage-1 carve rather than from wherever the previous one finished. The
-        # 2026-08-01 sweep ranked perfectly in sweep order with starting masses
-        # of 149.4, 135.9, 126.3, 119.3 and 113.2 g, which measured carve depth
-        # rather than halo position.
-        if seed_geometry is not None:
-            import copy as _copy
-            geom = _copy.deepcopy(seed_geometry)
-            geom = remap_geometry(geom, W_mm=W_mm, x_front_mm=x_front_mm,
-                                  d_halo_mm=d_halo_mm,
-                                  cargo_placement=cargo_placement)
-            enforce_symmetry(geom)
-            return geom
-        geom = build_unified_geometry(W_mm, x_front_mm, d_halo_mm,
-                                      init_mode="full", seed=seed,
-                                      cargo_placement=cargo_placement)
-        enforce_symmetry(geom)
-        return geom
 
     def run_quality_gates(geom, candidate_id, run_out_dir):
         os.makedirs(run_out_dir, exist_ok=True)
@@ -676,65 +473,6 @@ def unified_bindings(
         T_raw, T_pen, grads = race_value_and_grad_guarded(p, model)
         return ObjectiveOutcome(T_raw=T_raw, T_com_penalized=T_pen, gradients=grads)
 
-    def compute_adjoint_weight(D20, L, m_total, h_com, x_com, mu, wheel_moi):
-        p = _params(D20, L, m_total, h_com, x_com, mu, wheel_moi)
-        return float(compute_adjoint_objective_weight(p, model))
-
-    def run_adjoint(stl_half_path, objective_weight):
-        import trimesh
-        sensitivity = run_half_car_adjoint(stl_half_path, objective_weight, **adjoint_kwargs)
-        half_mesh = trimesh.load(stl_half_path, process=False)
-        if len(half_mesh.vertices) != len(sensitivity):
-            raise ValueError(
-                f"adjoint returned {len(sensitivity)} sensitivities but "
-                f"{stl_half_path} has {len(half_mesh.vertices)} vertices."
-            )
-        return AdjointOutcome(sensitivity=sensitivity, half_mesh=half_mesh)
-
-    def update_phi(geom, sensitivity_field, half_mesh, dt, weights,
-                   objective_gradients, mass_report):
-        return apply_adjoint_to_unified(
-            geom, sensitivity_field, half_mesh, dt,
-            {"w_aero": weights.w_aero, "w_mass": weights.w_mass,
-             "w_com": weights.w_com, "w_mfg": weights.w_mfg},
-            objective_gradients, mass_report,
-            max_substeps=hj_max_substeps, trust_radius_m=hj_trust_radius_m,
-            aero_smooth_m=hj_aero_smooth_m,
-        )
-
-    def write_record(outcome: dict) -> str:
-        # Drop keys CandidateRecord does not declare rather than raising.
-        #
-        # `CandidateRecord(**outcome)` meant any new key in the inner loop's
-        # payload broke persistence entirely, and inner_loop swallowed the
-        # TypeError -- so the record layer was dead and silent. It failed first
-        # on x_front_mm, then on stability_notes; both are now real fields, but
-        # the pattern would repeat on the next addition.
-        #
-        # Unknown keys are reported once, because silently dropping data is the
-        # failure mode this whole area already had.
-        import dataclasses as _dc
-        known = {f.name for f in _dc.fields(CandidateRecord)}
-        extra_keys = set(outcome) - known
-        if extra_keys:
-            import warnings
-            warnings.warn(
-                f"candidate record: dropping unrecognised field(s) "
-                f"{sorted(extra_keys)}. Add them to CandidateRecord if they "
-                f"are worth persisting.", RuntimeWarning, stacklevel=2,
-            )
-        return write_candidate_record(
-            CandidateRecord(**{k: v for k, v in outcome.items() if k in known}),
-            out_dir,
-        )
-
-    bindings = PipelineBindings(
-        initialize_phi_fields=initialize_phi_fields,
-        run_quality_gates=run_quality_gates,
-        compute_mass_report=compute_mass_report,
-        run_cfd=run_cfd, evaluate_objective=evaluate_objective,
-        compute_adjoint_weight=compute_adjoint_weight, run_adjoint=run_adjoint,
-        update_phi=update_phi, write_candidate_record=write_record,
-    )
-    validate_bindings(bindings)
-    return bindings
+    return SimpleNamespace(run_quality_gates=run_quality_gates,
+                           compute_mass_report=compute_mass_report,
+                           run_cfd=run_cfd, evaluate_objective=evaluate_objective, model=model)

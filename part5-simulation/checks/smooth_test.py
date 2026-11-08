@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 
 import paths  # noqa: F401,E402
-import pattern  # noqa: E402
+import space  # noqa: E402
 
 SETTINGS = ("mode6", "mode26", "mode41", "st_zt3", "st_b4", "s_b", "ft_h")
 OFFSETS = np.linspace(-1.0, 1.0, 9)      # in units of the setting's own solver step
@@ -51,10 +51,10 @@ def main() -> None:
     print(f"grid {a.mm} mm. Same car built twice differs by {twice * 1e3:.4f} mm3", flush=True)
     print(f"{'setting':10s} {'step':>6s} {'volume per step mm3':>20s} {'noise mm3':>10s} {'noise/step':>11s}")
     for name in SETTINGS:
-        lo, hi = pattern.bounds(name)
-        v0, h = pattern.get(base, name), pattern.step0(name)
+        lo, hi = space.bounds(name)
+        v0, h = space.get(base, name), space.step0(name)
         x = np.clip(v0 + OFFSETS * h, lo, hi)
-        y = np.array([body_cm3(pattern.put(base, name, float(v)), a.skin, tmp) for v in x]) * 1e3
+        y = np.array([body_cm3(space.put(base, name, float(v)), a.skin, tmp) for v in x]) * 1e3
         fit = np.polyval(np.polyfit(x, y, 2), x)
         noise, per_step = float(np.std(y - fit)), abs(float(np.polyfit(x, y, 1)[0])) * h
         print(f"{name:10s} {h:6.2f} {per_step:20.1f} {noise:10.2f} {noise / max(per_step, 1e-9):11.3f}", flush=True)

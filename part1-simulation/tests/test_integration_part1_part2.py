@@ -20,13 +20,10 @@ def test_co2_mass_constant_matches():
     _pass("test_co2_mass_constant_matches")
 
 def test_component_mass_com_shape_matches():
-    from mass_com_calculator import ComponentMassCOM as P1COM
+    from unified_phi import ComponentMassCOM as P1COM
     from physics_contract import ComponentMassCOM as P2COM
-    # Both should have same fields
-    p1_fields = P1COM.__dataclass_fields__
-    p2_fields = P2COM.__dataclass_fields__
-    assert "name" in p1_fields and "name" in p2_fields
-    assert "mass_kg" in p1_fields and "mass_kg" in p2_fields
+    # Part 1 uses Part 2's type when Part 2 is on the path (it is in every pipeline run)
+    assert P1COM is P2COM
     _pass("test_component_mass_com_shape_matches")
 
 def test_fixed_hardware_spec_accepts_part1_values():
@@ -43,18 +40,9 @@ def test_fixed_hardware_spec_accepts_part1_values():
     assert spec.co2_cartridge_mass_kg == 0.02115
     _pass("test_fixed_hardware_spec_accepts_part1_values")
 
-def test_lifecycle_states_match():
-    from geometry_contract import ALLOWED_LIFECYCLE_STATES as p1_states
-    try:
-        from candidate_record import ALLOWED_LIFECYCLE_STATES as p2_states
-        assert p1_states == p2_states, f"Lifecycle states mismatch: {p1_states ^ p2_states}"
-    except ImportError:
-        # Part 2 candidate_record may not be importable; skip
-        pass
-    _pass("test_lifecycle_states_match")
 
 def test_mass_com_can_be_ingested():
-    from mass_com_calculator import ComponentMassCOM
+    from physics_contract import ComponentMassCOM
     from mass_com_ingest import FixedHardwareSpec, ingest_mass_com
     machined = [
         ComponentMassCOM(name="nose", mass_kg=0.001, com_x_m=0.005, com_y_m=0.0, com_z_m=0.02),

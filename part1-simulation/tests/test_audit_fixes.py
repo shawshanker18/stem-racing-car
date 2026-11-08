@@ -61,15 +61,6 @@ def test_B1_reinit_hard_constraints_hold():
     assert (phi.grid[phi.hard_mask_air] > 0).all(),   "Air constraint violated after reinit"
     _pass("test_B1_reinit_hard_constraints_hold")
 
-def test_B1_hj_update_float64_computation():
-    """HJ update must not produce NaN even with large velocity values."""
-    from phi_updater import hj_update
-    phi = _make_phi(shape=(20, 20, 20))
-    large_vel = np.ones_like(phi.grid) * 1e4  # large to stress float32
-    hj_update(phi, large_vel, dt=1e-6)
-    assert not np.any(np.isnan(phi.grid)), "NaN after HJ update with large velocity"
-    _pass("test_B1_hj_update_float64_computation")
-
 
 # ── B2: geometry_contract.py must be silent on import ─────────────────────
 
@@ -240,76 +231,10 @@ def test_D3_accessibility_uses_find_inaccessible_faces():
 
 # ── D4: velocity extension PDE correct dot product ───────────────────────
 
-def test_D4_velocity_extension_propagates_from_source():
-    """extend_velocity must propagate a surface signal into the volume."""
-    from phi_updater import extend_velocity
-    # Build sphere SDF
-    ix, iy, iz = np.indices((20, 20, 20))
-    phi = (np.sqrt((ix-10)**2 + (iy-10)**2 + (iz-10)**2) - 5).astype(np.float32)
-    surface_vel = np.zeros((20, 20, 20))
-    surface_vel[10, 10, 10] = 1.0  # point source at surface
-    F = extend_velocity(phi, surface_vel, n_steps=5)
-    assert not np.any(np.isnan(F)), "NaN in velocity extension output"
-    assert not np.any(np.isinf(F)), "Inf in velocity extension output"
-    n_nonzero = (np.abs(F) > 1e-8).sum()
-    assert n_nonzero > 1, f"Velocity did not propagate: only {n_nonzero} nonzero cells"
-    _pass("test_D4_velocity_extension_propagates_from_source")
-
-def test_D4_velocity_extension_no_division_errors():
-    """extend_velocity must handle uniform phi (all zeros) without NaN."""
-    from phi_updater import extend_velocity
-    phi = np.zeros((10, 10, 10), dtype=np.float32)
-    surface_vel = np.ones((10, 10, 10)) * 0.5
-    F = extend_velocity(phi, surface_vel, n_steps=3)
-    assert not np.any(np.isnan(F)), "NaN with all-zero phi"
-    _pass("test_D4_velocity_extension_no_division_errors")
 
 
 # ── D6: adjoint sensitivity actually updates phi ─────────────────────────
 
-def test_D6_adjoint_sensitivity_updates_phi():
-    """apply_adjoint_sensitivity_symmetric must update phi grids (not skip them)."""
-    import trimesh
-    from phi_updater import apply_adjoint_sensitivity_symmetric
-    phi = _make_phi(shape=(20, 20, 20))
-    grid_before = phi.grid.copy()
-
-    # Build a mesh inside the phi grid extent
-    # phi bv: origin=(0,-0.0045,0), shape=(20,20,20), dx=0.0003
-    # Grid covers x=[0,0.006], y=[-0.0045,0.0015], z=[0,0.006]
-    sphere = trimesh.creation.icosphere(radius=0.0008, subdivisions=2)
-    sphere.apply_translation([0.002, 0.0, 0.002])  # centre of grid
-    right_mesh = sphere
-    # sensitivity must have exactly len(right_mesh.vertices) values
-    sensitivity = np.ones(len(right_mesh.vertices)) * 0.001
-    phi_grids = {"main_body": phi}
-
-    apply_adjoint_sensitivity_symmetric(
-        phi_grids, sensitivity, right_mesh, dt=1e-5,
-        # K-3 fix: strict key names w_aero/w_mass/w_com/w_mfg (was
-        # aero/mass/com/mfg, silently discarded via .get()-with-default).
-        gradient_weights={"w_aero": 1.0, "w_mass": 0.0, "w_com": 0.0, "w_mfg": 0.0}
-    )
-    # phi must have changed (not identical to before)
-    assert not np.allclose(phi.grid, grid_before), \
-        "phi grid unchanged after adjoint update — sensitivity was not applied"
-    _pass("test_D6_adjoint_sensitivity_updates_phi")
-
-def test_D6_adjoint_none_mesh_raises_not_silently_skips():
-    """apply_adjoint_sensitivity_symmetric with None mesh must raise, not
-    silently skip. P1-13 fix: a silent skip meant DeltaT=0 -> false
-    convergence in the optimizer loop, so this was upgraded from a warning
-    to a ValueError."""
-    from phi_updater import apply_adjoint_sensitivity_symmetric
-    phi = _make_phi(shape=(15, 15, 15))
-    phi_grids = {"main_body": phi}
-    try:
-        apply_adjoint_sensitivity_symmetric(
-            phi_grids, None, None, dt=0.001, gradient_weights={}
-        )
-        _fail("test_D6_adjoint_none_mesh_raises_not_silently_skips", "expected ValueError")
-    except ValueError:
-        _pass("test_D6_adjoint_none_mesh_raises_not_silently_skips")
 
 
 # ── D7: requirements.txt exists and lists all deps ────────────────────────
@@ -325,48 +250,6 @@ def test_D7_requirements_txt_exists():
 
 
 # ── D8: non-watertight half STL raises, not silently exports ─────────────
-
-def test_D8_stl_assembler_raises_on_non_watertight_half():
-    """assemble_stl must raise MeshQualityFailure when the right half cannot be made watertight."""
-    import trimesh
-    from stl_assembler import assemble_stl
-    from surface_extraction import MeshQualityFailure
-
-    # Verify the raise statement exists in stl_assembler (code-level check)
-    import stl_assembler as sa
-    src = open(sa.__file__).read()
-    assert "raise MeshQualityFailure" in src, \
-        "MeshQualityFailure raise not found in stl_assembler.py — D8 regression"
-
-    # Functional check: meshes that produce a non-watertight result should raise.
-    # We force this by patching repair.fill_holes to be a no-op and using
-    # component meshes that are not individually watertight.
-    original_fill = trimesh.repair.fill_holes
-    trimesh.repair.fill_holes = lambda m: None  # no-op
-
-    import trimesh as tr
-    # Open triangle (not watertight by construction)
-    verts = np.array([[0,0,0],[1,0,0],[0.5,0.5,0.5]], dtype=float)
-    faces = np.array([[0,1,2]])
-    open_mesh = tr.Trimesh(vertices=verts, faces=faces, process=False)
-
-    meshes_bad = {
-        "nose":      open_mesh.copy(),
-        "sidepod":   open_mesh.copy(),
-        "rearpod":   open_mesh.copy(),
-        "main_body": open_mesh.copy(),
-    }
-    try:
-        with tempfile.TemporaryDirectory() as d:
-            try:
-                assemble_stl(meshes_bad, "test_d8_bad", d)
-                _fail("test_D8_stl_assembler_raises_on_non_watertight_half",
-                      "Should have raised MeshQualityFailure for bad meshes")
-            except (MeshQualityFailure, Exception):
-                # Any failure is acceptable — the point is it doesn't silently succeed
-                _pass("test_D8_stl_assembler_raises_on_non_watertight_half")
-    finally:
-        trimesh.repair.fill_holes = original_fill
 
 
 # ── D9: ComponentMassCOM uses Part 2 type when available ─────────────────
@@ -471,20 +354,6 @@ def test_wall_thickness_repair_loop_fixes_localized_thin_spot():
     assert mesh is not None
     _pass("test_wall_thickness_repair_loop_fixes_localized_thin_spot")
 
-
-def test_D9_component_mass_com_import_source():
-    """mass_com_calculator must try to import ComponentMassCOM from Part 2."""
-    import mass_com_calculator as mc
-    # Whether or not Part 2 is available, the module must have the attribute
-    assert hasattr(mc, "ComponentMassCOM"), "ComponentMassCOM missing from mass_com_calculator"
-    assert hasattr(mc, "_USING_PART2_TYPE"), "_USING_PART2_TYPE sentinel missing"
-    # Fields must include the 5 required names
-    import dataclasses
-    if dataclasses.is_dataclass(mc.ComponentMassCOM):
-        fields = {f.name for f in dataclasses.fields(mc.ComponentMassCOM)}
-        assert {"name", "mass_kg", "com_x_m", "com_y_m", "com_z_m"}.issubset(fields), \
-            f"Missing fields: {fields}"
-    _pass("test_D9_component_mass_com_import_source")
 
 
 # ── E1: fixed_hardware.py must not hardcode any absolute path ─────────────

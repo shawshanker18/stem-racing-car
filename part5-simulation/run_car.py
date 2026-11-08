@@ -1,7 +1,7 @@
 """
 run_car.py -- one car through all five parts.
 
-    python run_car.py --out results/ [--body-json '{...}'] [--cfd] [--optimise N] [--final-cfd]
+    python run_car.py --out results/ [--body-json '{...}'] [--cfd]
 
   1. BODY      Part 1: the parametric body (param_body), machinable, sized so
                the car AS MANUFACTURED weighs 48.2 g (no ballast); right-half STL.
@@ -9,12 +9,9 @@ run_car.py -- one car through all five parts.
                guides as CFD patches; pockets and printed parts (joints); the
                manufacturing files; masses and regulation gates.
   3. LEGAL     Part 5: scrutineer checks on the assembled car.
-  4. CFD       Part 2 (via Part 3 bindings): forward solve with every patch,
+  4. CFD       Part 2 (via pipeline.py): forward solve with every patch,
                drag by part, race time.                               [--cfd]
-  5. OPTIMISE  Part 3 inner loop: CFD + adjoint on the whole car, level-set
-               update of the body.                                  [--optimise]
-  6. FINAL     re-place the rear wing on the final body, re-check legality,
-               optional final CFD, and write report.md + summary.json.
+  5. REPORT    report.md + summary.json.
 
 Every stage writes its artefacts to --out; the run never hides a failure.
 """
@@ -52,19 +49,9 @@ def build_body(a, out: Path):
     import param_body as pb
     use_spacing(a.cfd_mm)
     bp = pb.BodyParams.from_dict(json.loads(a.body_json))
-    field = None
-    if getattr(a, "phi_npy", None):
-        # A carved body: "block" is the whole legal envelope, the start of carving; a path
-        # is a field saved by a carving run (metres, this car's grid).
-        import numpy as np
-        import unified_phi as up
-        if a.phi_npy == "block":
-            field = up.build_unified_geometry(a.W, a.x_front, a.d_halo, init_mode="full").phi.grid * 1e3
-        else:
-            field = np.load(a.phi_npy) * 1e3
     g = pb.build(a.W, a.x_front, a.d_halo, bp,
                  target_body_kg=getattr(a, "_body_target_kg", None),
-                 skin_offset_mm=getattr(a, "skin_mm", None), field_mm=field)
+                 skin_offset_mm=getattr(a, "skin_mm", None))
     return g, {"param_body": bp.as_dict(), "spacing_mm": a.cfd_mm,
                "build": getattr(g, "build_report", {})}
 
@@ -190,8 +177,8 @@ def export_body(geom, path: Path) -> dict:
 
 
 # --------------------------------------------------------------------------- bindings
-def make_bindings(a, out: Path, asm: dict, seed_geom):
-    from pipeline_interface import unified_bindings
+def make_bindings(a, out: Path, asm: dict):
+    import pipeline
     import assembly as p4
     extra = p4.extra_surfaces_from(str(Path(asm["_dir"]) / "assembly.json"))
     # ONE meshing frame for every car: the legal envelope (T8.2 and T9.4.2
@@ -206,16 +193,12 @@ def make_bindings(a, out: Path, asm: dict, seed_geom):
     cfd_extra = ({"stage_timeout_s": a.stage_timeout_s}
                  if getattr(a, "stage_timeout_s", None) else {})
     cfd_extra.update(json.loads(getattr(a, "cfd_json", None) or "{}"))
-    return unified_bindings(
+    return pipeline.bindings(
         thrust_csv_path=str(PARTS["part2-simulation"] / "co2_thrust_data.csv"),
         fixed_hardware_kwargs=asm["fixed_hardware_kwargs"],
         out_dir=str(out / "records"),
         cfd_kwargs=dict(common, max_iterations=a.cfd_iters, **cfd_extra),
-        adjoint_kwargs=dict(common, primal_iters=a.adj_iters, adjoint_iters=a.adj_iters),
-        seed_geometry=seed_geom,
         ballast_material=None,               # the team adds no ballast
-        hj_max_substeps=a.substeps, hj_trust_radius_m=a.trust_mm / 1000.0,
-        hj_aero_smooth_m=a.smooth_mm / 1000.0,
     )
 
 
@@ -237,7 +220,7 @@ def cfd_and_objective(b, stl: Path, mstate: dict, wheel_moi: float, mu: float) -
     obj = b.evaluate_objective(D20=cfd.D20, L=cfd.L, m_total=m_car,
                                h_com=lz, x_com=lx, mu=mu, wheel_moi=wheel_moi)
     # The same car at exactly the mass target: what a body change is worth once
-    # re-sized, so fixed-skin screening cars compare fairly (pattern.py).
+    # re-sized, so fixed-skin screening cars compare fairly.
     m_target = _bl.target_competition_kg() + _bl.CARTRIDGE_KG
     obj_t = b.evaluate_objective(D20=cfd.D20, L=cfd.L, m_total=m_target,
                                  h_com=lz, x_com=lx, mu=mu, wheel_moi=wheel_moi)
@@ -309,7 +292,7 @@ def write_report(out: Path, S: dict) -> None:
           "| rule | margin | pass | note |", "|---|---|---|---|"]
     for k, v in sorted(lg["checks"].items(), key=lambda kv: (kv[1]["pass"], kv[0])):
         L.append(f"| {k} | {v['margin']:+.2f} | {'yes' if v['pass'] else '**NO**'} | {v['note']} |")
-    for tag in ("cfd_initial", "cfd_final"):
+    for tag in ("cfd_initial",):
         c = S.get(tag)
         if not c:
             continue
@@ -325,15 +308,6 @@ def write_report(out: Path, S: dict) -> None:
         L += ["", "## What-if (race objective)", "", "| change | Δ race time |", "|---|---|"]
         for k, v in S["whatif"].items():
             L.append(f"| {k} | {v:+.1f} ms |")
-    if S.get("optimisation"):
-        o = S["optimisation"]
-        L += ["", f"## Optimisation — {o['iterations']} iterations, stop: {o['stop_reason']}", "",
-              "| iter | state | D20 N | mass g | T_pen s |", "|---|---|---|---|---|"]
-        for h in o["history"]:
-            L.append(f"| {h['iteration']} | {h['lifecycle_state']} | "
-                     f"{h['D20'] if h['D20'] is None else round(h['D20'], 5)} | "
-                     f"{h['total_mass_kg'] if h['total_mass_kg'] is None else round(h['total_mass_kg']*1e3, 2)} | "
-                     f"{h['T_penalized'] if h['T_penalized'] is None else round(h['T_penalized'], 4)} |")
     L += ["", "## Recommendations", ""] + [f"- {r}" for r in S["recommendations"]]
     L += ["", "_Absolute times use the project's thrust curve, which has ~60 % of a real "
           "cartridge's impulse; differences and rankings are what to read._"]
@@ -360,19 +334,10 @@ def parse_args(argv=None):
                     help="legal ballast under the halo (T1.22); the body is sized for the rest")
     ap.add_argument("--body-json", default="{}",
                     help="parametric body (Part 1 param_body.BodyParams) as JSON; '{}' = the start car")
-    ap.add_argument("--phi-npy", default=None,
-                    help="a carved body instead of --body-json: 'block' (the whole legal envelope) "
-                         "or a .npy field saved by a carving run")
     ap.add_argument("--cfd", action="store_true")
-    ap.add_argument("--optimise", type=int, default=0)
-    ap.add_argument("--final-cfd", action="store_true")
     ap.add_argument("--res", default="coarse")
     ap.add_argument("--np", type=int, default=4)
     ap.add_argument("--cfd-iters", type=int, default=2000)
-    ap.add_argument("--adj-iters", type=int, default=1000)
-    ap.add_argument("--substeps", type=int, default=6)
-    ap.add_argument("--trust-mm", type=float, default=1.0)
-    ap.add_argument("--smooth-mm", type=float, default=0.0)
     ap.add_argument("--keep-runs", action="store_true")
     ap.add_argument("--cfd-if-legal", action="store_true",
                     help="skip the CFD if the car already broke a rule: an hour of a machine for a car the search must drop")
@@ -389,7 +354,7 @@ def main(argv=None):
     out.mkdir(parents=True, exist_ok=True)
     import assembly as p4
     import legality
-    from optimizer_contract import DEFAULT_ROLLING_MU
+    from physics_contract import DEFAULT_ROLLING_MU
     mu = DEFAULT_ROLLING_MU
 
     S = {"scalars": {"W": a.W, "x_front": a.x_front, "d_halo": a.d_halo},
@@ -400,7 +365,7 @@ def main(argv=None):
     S["wheels"] = asm["wheel_design"]
     S["parts_mass_g"] = asm["parts_mass_g"]
 
-    b = make_bindings(a, out, asm, seed_geom=copy.deepcopy(geom))
+    b = make_bindings(a, out, asm)
     ms = mass_state(b, geom)
     ms["manufactured_mass_g"] = manufactured_mass_kg(asm) * 1e3
     S["mass"] = {k: v for k, v in ms.items() if not k.startswith("_")}
@@ -435,46 +400,7 @@ def main(argv=None):
         S["cfd_initial"] = cfd_and_objective(b, Path(gate.stl_half_path), ms, moi, mu)
         S["whatif"] = what_if(b, ms, S["cfd_initial"], mu, moi)
 
-    if a.optimise:
-        log(f"5 OPTIMISE: {a.optimise} CFD+adjoint iterations")
-        from inner_loop import run_inner_loop
-        from optimizer_contract import GradientWeights, OptimizerConfig
-        cfg = OptimizerConfig(rtc_validated_against_track_data=False,
-                              cfd_pipeline_validated_on_known_geometry=False,
-                              mu=mu, wheel_moi_kg_m2=moi, iteration_budget=a.optimise,
-                              evolution_interval_iters=a.optimise)
-        start = copy.deepcopy(geom)
-        res = run_inner_loop(b, cfg, "car", a.W, a.x_front, a.d_halo, start,
-                             str(out / "records"), GradientWeights(1.0, 1.0, 0.0, 0.0))
-        S["optimisation"] = {"iterations": res.iterations_run, "stop_reason": res.stop_reason,
-                             "history": [h.__dict__ for h in res.history]}
-        # The BEST measured iterate, not the loop's last state: that one is the
-        # geometry after the final update, which no CFD ever saw. On 2026-09-26
-        # every aero-only step raised D20, so "last" was reliably the worst.
-        geom = res.final_phi_grids
-        if res.best is not None and res.best.phi_snapshot_paths:
-            geom.phi.load(next(iter(res.best.phi_snapshot_paths.values())))
-            S["optimisation"]["final_is"] = res.best.candidate_id
-        # The carved field, so the next run carries on from here (--phi-npy).
-        import numpy as np
-        np.save(out / "carved_phi.npy", np.asarray(geom.phi.grid, dtype=np.float32))
-        S["body_final"] = export_body(geom, out / "body_final_half.stl")
-        asm = parts_and_joints(a, out, geom, out / "body_final_half.stl", "parts_final",
-                               **p4kw)
-        ms = mass_state(b, geom)
-        ms["manufactured_mass_g"] = manufactured_mass_kg(asm) * 1e3
-        S["mass"] = {k: v for k, v in ms.items() if not k.startswith("_")}
-        chk = legality.check(str(out / "body_final_half.stl"), asm, S["mass"],
-                             S["body_final"]["field_bodies"],
-                             machined_stl=asm["joints"].get("machined_body_half_stl"))
-        S["legality"] = {"checks": chk, "summary": legality.summary(chk)}
-        if a.final_cfd:
-            log("6 FINAL CFD")
-            b2 = make_bindings(a, out, asm, seed_geom=None)
-            S["cfd_final"] = cfd_and_objective(b2, out / "body_final_half.stl", ms, moi, mu)
-
-    S["recommendations"] = recommend(S["legality"]["checks"],
-                                     S.get("cfd_final") or S.get("cfd_initial"))
+    S["recommendations"] = recommend(S["legality"]["checks"], S.get("cfd_initial"))
     (out / "summary.json").write_text(json.dumps(S, indent=2, default=str))
     write_report(out, S)
     log(f"done: {S['legality']['summary']}")
