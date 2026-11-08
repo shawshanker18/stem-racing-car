@@ -1,0 +1,27 @@
+name: image
+on:
+  workflow_dispatch:
+  push:
+    paths: ["docker/**"]
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        id: push
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/stem-cfd:latest,ghcr.io/${{ github.repository_owner }}/stem-cfd:${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+      - run: echo "DIGEST ${{ steps.push.outputs.digest }}" | tee -a "$GITHUB_STEP_SUMMARY"

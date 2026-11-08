@@ -1,0 +1,9 @@
+{
+  "main": "shawshanker18",
+  "image": "ghcr.io/shawshanker18/stem-cfd@sha256:FILL_IN_AFTER_THE_FIRST_IMAGE_BUILD",
+  "compute_repo_name": "stem-compute",
+  "reserve_on_main": 2,
+  "accounts": [
+    {"user": "shawshanker18", "plan": "pro", "cap": 40, "confirmed_for": {}}
+  ]
+}

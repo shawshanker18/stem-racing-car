@@ -1,0 +1,59 @@
+name: car
+run-name: ${{ inputs.tag }}            # the coordinator finds the run by this tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:  { description: "owner/name of the code repository", required: true }
+      sha:   { description: "commit SHA of code + batch", required: true }
+      batch: { description: "path of the batch file in that commit", required: true }
+      ids:   { description: "JSON list of case ids for this run", required: true }
+      tag:   { description: "unique run tag", required: true }
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  case:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 345               # 15 min under the 6 h limit, so the checkpoint can upload
+    container:
+      image: ghcr.io/OWNER/stem-cfd@sha256:DIGEST     # setup_compute_repos.py fills this in
+      options: --user 0 --shm-size=2g                 # root for checkout; MPI needs shared memory
+    strategy:
+      fail-fast: false
+      max-parallel: 256
+      matrix:
+        id: ${{ fromJSON(inputs.ids) }}
+    steps:
+      - name: Code and batch at the fixed commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.sha }}
+          path: code
+      - name: Machine
+        run: |
+          echo "cpu: $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2)  nproc: $(nproc)  mem: $(free -g | awk '/Mem/{print $2}') GB"
+      - name: Run the case
+        working-directory: code
+        run: python tools/worker.py --batch "${{ inputs.batch }}" --id ${{ matrix.id }} --out ../out
+      - name: Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ matrix.id }}
+          path: |
+            out/case_*.json
+            out/logs/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Checkpoint (only cases that asked for one)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ckpt-${{ matrix.id }}
+          path: out/ckpt/*.tar.zst
+          retention-days: 7
+          if-no-files-found: ignore
