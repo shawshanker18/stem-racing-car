@@ -5,8 +5,9 @@
 Exit 0 when the car is the same, 1 otherwise, with the differences printed.
 
 "The same" means: every manufacturing STL has the same volume, area and bounds (relative
-1e-6), every legality margin agrees to 1e-6 mm, the same rules fail, and the mass agrees to
-1e-6 g. File hashes are recorded too; on one machine they are identical, but across operating
+1e-4: the remesher's output differs in the 6th digit between Windows and Linux, measured
+2e-6 in volume and 2e-5 in area on the front assembly), every legality margin agrees to
+1e-6 mm, the same rules fail, and the mass agrees to 1e-6 g. File hashes are recorded too; on one machine they are identical, but across operating
 systems the last bits of a vertex can differ without changing the car, so hashes alone would
 fail a correct build.
 """
@@ -18,6 +19,7 @@ import sys
 from pathlib import Path
 
 TOL = 1e-6
+STL_REL_TOL = 1e-4
 
 
 def _sha(p: Path) -> str:
@@ -46,7 +48,7 @@ def fingerprint(d: Path) -> dict:
 
 def _close(x, y, rel=False) -> bool:
     if isinstance(x, (int, float)) and isinstance(y, (int, float)):
-        return abs(x - y) <= (TOL * max(abs(x), abs(y), 1e-12) if rel else TOL)
+        return abs(x - y) <= (STL_REL_TOL * max(abs(x), abs(y), 1e-12) if rel else TOL)
     if isinstance(x, list) and isinstance(y, list) and len(x) == len(y):
         return all(_close(a, b, rel) for a, b in zip(x, y))
     return x == y
