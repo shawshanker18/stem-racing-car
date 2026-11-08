@@ -34,7 +34,7 @@ jobs:
         run: (for i in 1 2 3 4 5 6; do timeout 90 sudo apt-get update -q && break; done) && sudo apt-get install -y -q libopengl0 libglu1-mesa libegl1 libgl1 libgomp1 libxkbcommon0
       - run: pip install $PY_DEPS
       - name: Build random cars
-        working-directory: part5-simulation
+        working-directory: car
         run: python -W ignore checks/stress_cars.py --seed $(( ${{ matrix.seed }} + ${{ inputs.seed_base }} )) --n ${{ inputs.cars_per_machine }} --out ../stress 2>&1 | grep --line-buffered -E '^car '
       - uses: actions/upload-artifact@v4
         if: always()

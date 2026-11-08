@@ -38,7 +38,7 @@ jobs:
           echo "cpu: $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2)  nproc: $(nproc)  mem: $(free -g | awk '/Mem/{print $2}') GB"
       - name: Run the case
         working-directory: code
-        run: python tools/worker.py --batch "${{ inputs.batch }}" --id ${{ matrix.id }} --out ../out
+        run: python compute/worker.py --batch "${{ inputs.batch }}" --id ${{ matrix.id }} --out ../out
       - name: Results
         if: always()
         uses: actions/upload-artifact@v4

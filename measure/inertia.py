@@ -3,7 +3,7 @@
 Method A (always): scale the CAD inertia by the measured mass (a uniform-density print).
     python measure/inertia.py scale --cad-I 1.2317e-7 --cad-mass-g 1.152 --mass-g 1.10 --bearing-g 0.30 \
         [--key wheel_I_front_kgm2 --write]
-  The CAD values come from part4-simulation/wheel.py summary(); its mass and inertia include
+  The CAD values come from components/wheel.py summary(); its mass and inertia include
   one bearing, which is taken out before scaling and put back after.
 
 Method B (a check): trifilar pendulum, I = m g R^2 T^2 / (4 pi^2 L), the platform subtracted.

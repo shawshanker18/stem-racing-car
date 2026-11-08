@@ -16,10 +16,19 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 
 
+def confirmed(part: int) -> set:
+    """Users confirmed for Part N: compute/confirmations/partN.json, written when the user answers
+    the compute question (bible 0.7). One file per Part, so parallel work never edits the same file:
+    {"users": ["alice", "bob"], "user_said": "<quote>", "date": "YYYY-MM-DD"}"""
+    p = HERE / "confirmations" / f"part{part}.json"
+    return set(json.loads(p.read_text())["users"]) if p.exists() else set()
+
+
 def weights(cfg: dict, part: int) -> dict:
     w = {}
+    ok = confirmed(part)
     for acc in cfg["accounts"]:
-        if f"part{part}" in acc.get("confirmed_for", {}):
+        if acc["user"] in ok:
             cap = acc["cap"] - (cfg["reserve_on_main"] if acc["user"] == cfg["main"] else 0)
             if cap > 0:
                 w[acc["user"]] = cap

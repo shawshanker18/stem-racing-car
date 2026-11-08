@@ -90,7 +90,7 @@ def test_spindown_recovers_torques():
 
 def test_block_density_subtracts_bore_and_slot():
     from density import block_density
-    sys.path.insert(0, str(HERE.parent / "part1-simulation"))
+    sys.path.insert(0, str(HERE.parent / "body"))
     from geometry_contract import MODEL_BLOCK_BORE_DEPTH_MM, MODEL_BLOCK_BORE_DIA_MM
     vol_cm3 = (223 * 65 * 50 - math.pi * (MODEL_BLOCK_BORE_DIA_MM / 2) ** 2 * MODEL_BLOCK_BORE_DEPTH_MM
                - 6 * 6 * 223) / 1000.0

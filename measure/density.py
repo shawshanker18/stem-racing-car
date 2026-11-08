@@ -6,7 +6,7 @@ density (M6). Plain arithmetic; the value is in recording where each number came
     python measure/density.py block inputs/raw/M6_density/<date>/block.csv
         columns: mass_g, length_mm, width_mm, height_mm   (one row per block; the official
         pre-bored hole and the underside slot are subtracted using the drawing values in
-        part1-simulation/geometry_contract.py)
+        body/geometry_contract.py)
     python measure/density.py cubes inputs/raw/M6_density/<date>/cubes.csv --key pa12_density_gcm3
         columns: mass_g, x_mm, y_mm, z_mm
 
@@ -23,7 +23,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parent / "part1-simulation"))
+sys.path.insert(0, str(HERE.parent / "body"))
 
 
 def _rows(path: str) -> list:

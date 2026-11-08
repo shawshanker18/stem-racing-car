@@ -1,9 +1,13 @@
 name: tests
 
-# All five parts' tests and whole cars, split across parallel machines.
+# Every folder's tests, the golden car, and whole cars, split across parallel machines.
 on:
   push:
   workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -18,15 +22,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Part 1 is the slow suite, so it is shared between four machines.
+        # body is the slow suite, so it is shared between four machines.
         include:
-          - { part: part1-simulation, shard: 0, of: 4 }
-          - { part: part1-simulation, shard: 1, of: 4 }
-          - { part: part1-simulation, shard: 2, of: 4 }
-          - { part: part1-simulation, shard: 3, of: 4 }
-          - { part: part2-simulation, shard: 0, of: 1 }
-          - { part: part4-simulation, shard: 0, of: 1 }
-          - { part: part5-simulation, shard: 0, of: 1 }
+          - { part: body, shard: 0, of: 4 }
+          - { part: body, shard: 1, of: 4 }
+          - { part: body, shard: 2, of: 4 }
+          - { part: body, shard: 3, of: 4 }
+          - { part: cfd, shard: 0, of: 1 }
+          - { part: race, shard: 0, of: 1 }
+          - { part: components, shard: 0, of: 1 }
+          - { part: car, shard: 0, of: 1 }
           - { part: compute, shard: 0, of: 1 }
           - { part: measure, shard: 0, of: 1 }
           - { part: search, shard: 0, of: 1 }
@@ -41,8 +46,6 @@ jobs:
         run: python -c "import pymeshlab as m; s=m.MeshSet(); s.create_cube(); s.apply_filter('meshing_isotropic_explicit_remeshing', iterations=1); print('remesher ok')"
       - name: pytest
         working-directory: ${{ matrix.part }}
-        env:
-          PART2_PATH: ${{ github.workspace }}/part2-simulation
         run: |
           files=$(ls tests/test_*.py | awk -v s=${{ matrix.shard }} -v n=${{ matrix.of }} 'NR % n == s')
           python -m pytest $files -q -p no:cacheprovider --tb=short -W ignore
@@ -59,12 +62,16 @@ jobs:
       - name: Libraries the remesher needs
         run: (for i in 1 2 3 4 5 6; do timeout 90 sudo apt-get update -q && break; done) && sudo apt-get install -y -q libopengl0 libglu1-mesa libegl1 libgl1 libgomp1 libxkbcommon0
       - run: pip install $PY_DEPS
-      - working-directory: part5-simulation
+      - working-directory: car
         run: |
           python -W ignore run_car.py --out ../out/G1 --body-json '{}' --skin-mm 3.93
           python checks/golden.py compare ../golden/G1.fp.json ../out/G1
 
   car:
+    # Whole cars, some with hours of CFD: only on main, on the integration branch, or by hand.
+    # Several chats push working branches in parallel; running these on every push would
+    # fill the main account's runners and starve the compute farm.
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rebuild/bible'
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     strategy:
@@ -102,7 +109,7 @@ jobs:
           curl -s https://dl.openfoam.com/add-debian-repo.sh | sudo bash
           sudo apt-get install -y openfoam2412-default
       - name: Build the car
-        working-directory: part5-simulation
+        working-directory: car
         run: |
           set -o pipefail
           mkdir -p ../out
@@ -111,10 +118,10 @@ jobs:
         if: always()
         run: |
           mkdir -p out/${{ matrix.id }}/solver_logs
-          find part2-simulation/cfd_case_template -path "*/logs/*.log" 2>/dev/null | while read f; do
+          find cfd/cfd_case_template -path "*/logs/*.log" 2>/dev/null | while read f; do
             tail -200 "$f" > "out/${{ matrix.id }}/solver_logs/$(basename "$f")"
           done
-          rm -rf part2-simulation/cfd_case_template/*runs* 2>/dev/null || true
+          rm -rf cfd/cfd_case_template/*runs* 2>/dev/null || true
       - name: Rule checks
         if: always()
         run: |

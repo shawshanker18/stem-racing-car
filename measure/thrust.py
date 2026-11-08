@@ -7,7 +7,7 @@ Writes  --out: columns "time (s)", "force (N)", "mass (kg)" on a 0.5 ms grid fro
         where "mass (kg)" is the PROPELLANT still on board (charge x (1 - impulse so far / total)).
         <dir>/summary.json: per run peak, time to peak, impulse, duration, ringing frequency;
         ensemble mean and standard deviation of impulse and peak.
-The race model (part2-simulation/race_objective.py) reads the three columns by name.
+The race model (race/race_model.py) reads the three columns by name.
 """
 from __future__ import annotations
 

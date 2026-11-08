@@ -1,7 +1,7 @@
 {
  "_about": "Every physical input the code uses. Written by measure/*.py and the agent when processing a raw lab folder (bible Part 3). measured=false means a placeholder; every report lists those.",
  "thrust_csv": {
-  "value": "part2-simulation/co2_thrust_data.csv",
+  "value": "race/co2_thrust_data.csv",
   "sd": null,
   "unit": "path",
   "measured": false,

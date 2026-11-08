@@ -9,6 +9,7 @@ import base64
 import json
 from pathlib import Path
 
+from dispatch import confirmed
 from gh import gh
 
 HERE = Path(__file__).resolve().parent
@@ -25,7 +26,7 @@ def main() -> None:
     readme = (HERE / "worker" / "README.md").read_text()
     name = cfg["compute_repo_name"]
     for acc in cfg["accounts"]:
-        if f"part{a.part}" not in acc.get("confirmed_for", {}):
+        if acc["user"] not in confirmed(a.part):
             print(f"skip {acc['user']}: not confirmed for Part {a.part}")
             continue
         u, repo = acc["user"], f"{acc['user']}/{name}"

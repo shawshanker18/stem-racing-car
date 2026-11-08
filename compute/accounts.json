@@ -4,6 +4,6 @@
   "compute_repo_name": "stem-compute",
   "reserve_on_main": 2,
   "accounts": [
-    {"user": "shawshanker18", "plan": "pro", "cap": 40, "confirmed_for": {}}
+    {"user": "shawshanker18", "plan": "pro", "cap": 40}
   ]
 }

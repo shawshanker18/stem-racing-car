@@ -1,0 +1,401 @@
+"""
+run_car.py -- one car through all five parts.
+
+    python run_car.py --out results/ [--body-json '{...}'] [--cfd]
+
+  1. BODY      Part 1: the parametric body (param_body), machinable, sized so
+               the car AS MANUFACTURED weighs 48.2 g (no ballast); right-half STL.
+  2. PARTS     Part 4: wheels, supports, halo, nose, front + rear wing, tether
+               guides as CFD patches; pockets and printed parts (joints); the
+               manufacturing files; masses and regulation gates.
+  3. LEGAL     Part 5: scrutineer checks on the assembled car.
+  4. CFD       Part 2 (via pipeline.py): forward solve with every patch,
+               drag by part, race time.                               [--cfd]
+  5. REPORT    report.md + summary.json.
+
+Every stage writes its artefacts to --out; the run never hides a failure.
+"""
+from __future__ import annotations
+
+import argparse
+import copy
+import json
+import time
+from pathlib import Path
+
+import paths  # noqa: F401
+
+PARTS = paths.PARTS
+MAX_BODY_FACES = 400_000
+
+
+def _peak_gb() -> str:
+    try:
+        import resource
+        return f" [peak {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6:.1f} GB]"
+    except ImportError:         # Windows
+        return ""
+
+
+def log(msg: str) -> None:
+    print(f"[run_car {time.strftime('%H:%M:%S')}] {msg}{_peak_gb()}", flush=True)
+
+
+# --------------------------------------------------------------------------- body
+def build_body(a, out: Path):
+    """The parametric body (Part 1 param_body): drawn, made machinable, and
+    sized by a skin offset (or at a fixed skin with --skin-mm)."""
+    from coarse import use_spacing
+    import param_body as pb
+    use_spacing(a.cfd_mm)
+    bp = pb.BodyParams.from_dict(json.loads(a.body_json))
+    g = pb.build(a.W, a.x_front, a.d_halo, bp,
+                 target_body_kg=getattr(a, "_body_target_kg", None),
+                 skin_offset_mm=getattr(a, "skin_mm", None))
+    return g, {"param_body": bp.as_dict(), "spacing_mm": a.cfd_mm,
+               "build": getattr(g, "build_report", {})}
+
+
+def parts_and_joints(a, out: Path, geom, body_stl: Path, parts_dir: str, **p4kw) -> dict:
+    """Part 4 parts on this body, then the joints: every printed part becomes a
+    positive glued into a milled pocket (Part 4 joints.py). The mass the
+    joints move (plastic plugs for foam, buried CAD trimmed off) goes into the
+    hardware masses the rollup uses. Manufacturing files go to out/manufacture."""
+    import assembly as p4
+    import joints
+    asm = p4.build(a.W, a.x_front, a.d_halo, str(body_stl), str(out / parts_dir), **p4kw)
+    asm["_dir"] = str(out / parts_dir)
+    asm["ballast_g"] = getattr(a, "ballast_g", 0.0)
+    import trimesh
+    lm = geom.landmarks
+    jr = joints.make_all(trimesh.load(str(body_stl), force="mesh"), asm,
+                         lm["ref_plane_A_m"] * 1e3, lm["rear_face_m"] * 1e3,
+                         out / "manufacture")
+    f, d = asm["fixed_hardware_kwargs"], jr["mass_delta_kg"]
+    sup = d.get("supports", 0.0)
+    f["wheels_front_mass_kg"] += sup / 2
+    f["wheels_rear_mass_kg"] += sup / 2
+    f["wheels_axles_mass_kg"] += sup
+    f["rear_wing_mass_kg"] += sum(v for k, v in d.items() if k != "supports")
+    asm["joints"] = jr
+    return asm
+
+
+def manufactured_mass_kg(asm) -> float:
+    """The car as it is made, without the cartridge: every machined and printed
+    file's own volume x its material (Part 4 joints), the wheels with their
+    bearings, and the halo. This, not the model's rollup, is what the
+    scrutineer's scale reads: on 2026-09-30 a car the rollup put at 48.21 g
+    was 47.84 g as manufactured -- under the 48.0 g floor."""
+    wd = asm["wheel_design"]
+    return (asm["joints"]["manufactured_g"] + 2 * wd["front"]["mass_g"] + 2 * wd["rear"]["mass_g"]
+            + asm.get("ballast_g", 0.0)) * 1e-3 + asm["fixed_hardware_kwargs"]["halo_mass_kg"]
+
+
+def build_car(a, out: Path, **p4kw):
+    """Body and parts to a fixed point: the body is sized so the car AS
+    MANUFACTURED weighs the target, but the joints (pockets and plugs) and so
+    the parts' masses depend on the body."""
+    import ballast
+    import unified_phi as up
+    target = None
+    targets = []
+    for pass_ in range(1, 7):
+        prev = target
+        a._body_target_kg = target
+        geom, info = build_body(a, out)
+        info.update(export_body(geom, out / "body_half.stl"))
+        asm = parts_and_joints(a, out, geom, out / "body_half.stl", "parts", **p4kw)
+        # ask the body for the shortfall on top of what it weighs now
+        new = (sum(c.mass_kg for c in up.compute_mass_com(geom))
+               + ballast.target_competition_kg() - manufactured_mass_kg(asm))
+        # damped: the keel under a support beam grows as the body grows, so an
+        # undamped fixed point overshoots and oscillates (1.6 g off, 2026-09-27)
+        target = new if prev is None else 0.5 * (prev + new)
+        targets.append(new * 1e3)
+        log(f"  pass {pass_}: body target {new*1e3:.2f} g; joints "
+            + ", ".join(f"{k} {v*1e3:+.2f}" for k, v in asm["joints"]["mass_delta_kg"].items())
+            + f"; supports each {[round(x, 2) for x in asm['info'].get('support_mass_g_each', [])]}")
+        if getattr(a, "skin_mm", None) is not None:
+            break                                  # fixed skin: nothing to iterate
+        if pass_ >= 2 and abs(new - prev) < 5e-5:
+            break
+    info["body_target_g"] = target * 1e3
+    info["build_passes"] = pass_
+    info["body_targets_g"] = targets
+    return geom, info, asm
+
+
+def part4_kwargs(a) -> dict:
+    import beam_support as bsm
+    kind = getattr(a, "support", "beam")
+    sup = {"cad": None, "beam": bsm.BeamSupport()}[kind]
+    if kind == "beam" and getattr(a, "support_json", None):
+        sup = bsm.BeamSupport(**json.loads(a.support_json))
+    # The body ends at Ref A; the nose cone is a printed SLS PA12 shell (team
+    # spec 2026-09-27) whose root takes the body's section 1 mm aft of Ref A.
+    import nose as ns
+    nk = dict(blend_after_ref_a_mm=1.0, root_scale=1.0, material="PA12", wall_mm=0.8)
+    if getattr(a, "nose_json", None):
+        nk.update(json.loads(a.nose_json))
+    kw = {"support": sup, "nose": ns.NoseCone(**nk)}
+    if getattr(a, "fwing_json", None):
+        import wings as wg
+        kw["front"] = wg.FrontWing(**json.loads(a.fwing_json))
+    if getattr(a, "rwing_json", None):
+        import wings as wg
+        kw["rear"] = wg.RearWing(**json.loads(a.rwing_json))
+    return kw
+
+
+def export_body(geom, path: Path) -> dict:
+    import unified_phi as up
+    from scipy.ndimage import label
+    half = up.extract_half_surface(geom)
+    half.vertices[half.vertices[:, 1] < 0, 1] = 0.0
+    if len(half.faces) > MAX_BODY_FACES:      # a 0.3 mm grid otherwise runs a 16 GB machine out of memory
+        # manifold's simplify keeps it a closed solid, which decimation does not (20 um)
+        import manifold3d as m3
+        import numpy as np
+        import trimesh
+        o = m3.Manifold(m3.Mesh(vert_properties=np.asarray(half.vertices, np.float32),
+                                tri_verts=np.asarray(half.faces, np.uint32))).simplify(2e-5).to_mesh()
+        half = trimesh.Trimesh(np.asarray(o.vert_properties)[:, :3], np.asarray(o.tri_verts), process=False)
+        half.merge_vertices()
+    if not half.is_watertight:
+        # Zero-area triangles where the surface passes through a grid point pinch it there
+        # (four and eight faces on an edge, 1 car in 1000). Without them it closes.
+        half.update_faces(half.nondegenerate_faces())
+        half.remove_unreferenced_vertices()
+        half.merge_vertices()
+    half.export(str(path), file_type="stl_ascii")
+    _, n = label(geom.phi.grid < 0)
+    if not half.is_watertight:
+        raise SystemExit(f"body STL {path.name} is not watertight; Part 2 would reject it")
+    return {"faces": len(half.faces), "watertight": bool(half.is_watertight),
+            "field_bodies": int(n), "t55_cells_protected": getattr(geom, "t55_cells_protected", 0)}
+
+
+# --------------------------------------------------------------------------- bindings
+def make_bindings(a, out: Path, asm: dict):
+    import pipeline
+    import assembly as p4
+    extra = p4.extra_surfaces_from(str(Path(asm["_dir"]) / "assembly.json"))
+    # ONE meshing frame for every car: the legal envelope (T8.2 and T9.4.2
+    # overhangs, T3.4 half width, T3.5 height, 1 mm slack). Sized from each
+    # car's own bounding box, a longer nose or a wider wing moved the domain,
+    # the background cells and the refinement boxes -- remeshing noise that
+    # has nothing to do with the change being measured.
+    ref_a, ref_b = a.x_front - 16.0, a.x_front + a.W + 16.0
+    frame = (((ref_a - 41.0) / 1e3, 0.0, 0.0), ((ref_b + 41.0) / 1e3, 0.0435, 0.066))
+    common = {"resolution": a.res, "n_subdomains": a.np, "extra_surfaces": extra,
+              "keep_run_dir": a.keep_runs, "domain_reference_bounds": frame}
+    cfd_extra = ({"stage_timeout_s": a.stage_timeout_s}
+                 if getattr(a, "stage_timeout_s", None) else {})
+    cfd_extra.update(json.loads(getattr(a, "cfd_json", None) or "{}"))
+    return pipeline.bindings(
+        thrust_csv_path=None,                # the curve inputs/measured.json names
+        fixed_hardware_kwargs=asm["fixed_hardware_kwargs"],
+        out_dir=str(out / "records"),
+        cfd_kwargs=dict(common, max_iterations=a.cfd_iters, **cfd_extra),
+        ballast_material=None,               # the team adds no ballast
+    )
+
+
+def mass_state(b, geom) -> dict:
+    m = b.compute_mass_report(geom)
+    from ballast import CARTRIDGE_KG
+    return {"total_g": m.total_mass_kg * 1e3, "competition_mass_g": (m.total_mass_kg - CARTRIDGE_KG) * 1e3,
+            "com_x_mm": m.com_x_m * 1e3, "com_z_mm": m.com_z_m * 1e3, "_report": m}
+
+
+def cfd_and_objective(b, stl: Path, mstate: dict, asm: dict, a) -> dict:
+    """CFD of the car, then its race time (race/race_model.py) twice: at the mass it
+    was built to (T_s), and at exactly the competition-mass target (T_at_target_s), so cars sized
+    to slightly different masses compare on their design, not on the sizing tolerance."""
+    import ballast as _bl
+    from dataclasses import replace
+    t0 = time.time()
+    cfd = b.run_cfd(str(stl))
+    m_car = mstate["manufactured_mass_g"] * 1e-3
+    car = b.make_car(cfd, mstate["_report"], m_car, asm, a.x_front, a.W)
+    r = b.race(car)
+    r_t = b.race(replace(car, m_car=_bl.target_competition_kg()))
+    parts = {}
+    if cfd.patch_forces:
+        for k, v in cfd.patch_forces.items():
+            parts[k] = {"D_N": 2 * v["D_half_N"], "L_N": 2 * v["L_half_N"],
+                        "y_plus": v.get("y_plus")}
+    return {"D20_N": cfd.D20, "L_N": cfd.L, "My_Nm": cfd.My, "converged": cfd.converged,
+            "residual": cfd.residual_final, "stderr": cfd.force_mean_stderr,
+            "drift": cfd.force_drift, "parts": parts,
+            "T_s": r.time_s, "T_at_target_s": r_t.time_s, "v_max_ms": r.v_max,
+            "launch_margin_N": r.launch_margin_N, "guide_impulse_Ns": r.guide_impulse_Ns,
+            "rates": b.rates(car), "unmeasured_inputs": b.unmeasured,
+            "seconds": round(time.time() - t0, 1)}
+
+
+def recommend(legal: dict, cfd: dict | None) -> list:
+    rec = []
+    bad = [k for k, v in legal.items() if not v["pass"]]
+    if bad:
+        rec.append(f"FIX LEGALITY FIRST: {', '.join(bad)}.")
+    if cfd and cfd["parts"]:
+        tot = cfd["D20_N"]
+        w = cfd["rates"]["ms_per_mN_drag"]          # ms per mN = s per N
+        shares = sorted(((v["D_N"] / tot, k, v["D_N"]) for k, v in cfd["parts"].items()),
+                        reverse=True)
+        wheels = sum(s for s, k, _ in shares if k.startswith("wheel"))
+        top = ", ".join(f"{k} {100*s:.0f} % ({1e3*w*d:.0f} ms)" for s, k, d in shares[:4])
+        rec.append(f"Drag by part: {top}.")
+        if wheels > 0.5:
+            rec.append(f"Wheels carry {100*wheels:.0f} % of the drag. Work on wheel flow first: "
+                       "front-wing shape and position ahead of the front wheels, body width "
+                       "around the rear wheels, closed wheel faces. Body-only changes act on "
+                       "the minority of the drag.")
+        if cfd.get("launch_margin_N", 1.0) < 0:
+            rec.append(f"A wheel lifts at launch (lowest axle load {cfd['launch_margin_N']:+.2f} N): "
+                       "the thrust line sits above the centre of mass. Lower the centre of mass or "
+                       "the chamber axis (bible Part 4 section 4.2.2).")
+        if not cfd["converged"]:
+            rec.append("The CFD solve did not pass the residual/drift gate: treat its drag as "
+                       "indicative and re-run longer before ranking on it.")
+    return rec
+
+
+# --------------------------------------------------------------------------- report
+def write_report(out: Path, S: dict) -> None:
+    L = []
+    um = (S.get("cfd_initial") or {}).get("unmeasured_inputs")
+    if um:
+        L += [f"> WARNING: these inputs are not measured: {', '.join(um)}. "
+              "Times are model estimates (bible Part 3).", ""]
+    L += [f"# Car report — W {S['scalars']['W']} mm, x_front {S['scalars']['x_front']} mm, "
+         f"d_halo {S['scalars']['d_halo']} mm", ""]
+    ms = S["mass"]
+    L += ["## Mass", "", "| item | value |", "|---|---|",
+          f"| mass as manufactured (T3.6) | {ms.get('manufactured_mass_g', ms['competition_mass_g']):.2f} g |",
+          f"| mass by the model's rollup | {ms['competition_mass_g']:.2f} g |",
+          f"| COM x / z | {ms['com_x_mm']:.1f} / {ms['com_z_mm']:.1f} mm |",
+          f"| wheel design | {S['wheels']['design']} (mean I {S['wheels']['mean_I_kg_m2']*1e9:.1f} g·mm²) |",
+          ""]
+    lg = S["legality"]
+    L += [f"## Legality — {lg['summary']['n_checks']} checks, {lg['summary']['n_failed']} failed", "",
+          "| rule | margin | pass | note |", "|---|---|---|---|"]
+    for k, v in sorted(lg["checks"].items(), key=lambda kv: (kv[1]["pass"], kv[0])):
+        L.append(f"| {k} | {v['margin']:+.2f} | {'yes' if v['pass'] else '**NO**'} | {v['note']} |")
+    for tag in ("cfd_initial",):
+        c = S.get(tag)
+        if not c:
+            continue
+        L += ["", f"## {tag.replace('_', ' ').title()}", "",
+              f"D20 {c['D20_N']:.4f} N, lift {c['L_N']:+.4f} N, converged {c['converged']} "
+              f"(residual {c['residual']:.1e}, stderr {100*(c['stderr'] or 0):.2f} %, "
+              f"drift {100*(c['drift'] or 0):.2f} %), race time {c['T_s']:.4f} s "
+              f"({c['T_at_target_s']:.4f} s at the mass target), launch margin {c['launch_margin_N']:+.3f} N, "
+              f"{c['seconds']:.0f} s wall.", "",
+              "| part | drag N | share |", "|---|---|---|"]
+        for k, v in sorted(c["parts"].items(), key=lambda kv: -kv[1]["D_N"]):
+            L.append(f"| {k} | {v['D_N']:.4f} | {100*v['D_N']/c['D20_N']:.1f} % |")
+    c = S.get("cfd_initial")
+    if c:
+        L += ["", "## Exchange rates (race model)", "", "| lever | race time |", "|---|---|"]
+        for k, v in c["rates"].items():
+            L.append(f"| {k.replace('_', ' ')} | {v:+.3f} |")
+    L += ["", "## Recommendations", ""] + [f"- {r}" for r in S["recommendations"]]
+    L += ["", "_Times use the thrust curve named in inputs/measured.json. Until it is measured "
+          "(bible Part 3) it is the synthetic curve with about 60 % of a real cartridge's impulse._"]
+    (out / "report.md").write_text("\n".join(L) + "\n", encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- main
+def parse_args(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--W", type=float, default=120.3)
+    ap.add_argument("--x-front", type=float, default=46.0)
+    ap.add_argument("--d-halo", type=float, default=43.72)
+    ap.add_argument("--cfd-mm", type=float, default=1.0)
+    ap.add_argument("--support", choices=("cad", "beam"), default="beam",
+                    help="beam = the team's architecture, parametric; cad = the v2 CAD supports (reference)")
+    ap.add_argument("--support-json", default=None, help="BeamSupport parameters as JSON")
+    ap.add_argument("--nose-json", default=None, help="NoseCone parameters as JSON (parametric body)")
+    ap.add_argument("--fwing-json", default=None, help="FrontWing parameters as JSON")
+    ap.add_argument("--rwing-json", default=None, help="RearWing parameters as JSON")
+    ap.add_argument("--skin-mm", type=float, default=None,
+                    help="fixed skin offset: no mass sizing (gradient checks)")
+    ap.add_argument("--ballast-g", type=float, default=0.0,
+                    help="legal ballast under the halo (T1.22); the body is sized for the rest")
+    ap.add_argument("--body-json", default="{}",
+                    help="parametric body (Part 1 param_body.BodyParams) as JSON; '{}' = the start car")
+    ap.add_argument("--cfd", action="store_true")
+    ap.add_argument("--res", default="coarse")
+    ap.add_argument("--np", type=int, default=4)
+    ap.add_argument("--cfd-iters", type=int, default=2000)
+    ap.add_argument("--keep-runs", action="store_true")
+    ap.add_argument("--cfd-if-legal", action="store_true",
+                    help="skip the CFD if the car already broke a rule: an hour of a machine for a car the search must drop")
+    ap.add_argument("--stage-timeout-s", type=int, default=None,
+                    help="per OpenFOAM stage; fine meshes need more than the 7200 s default")
+    ap.add_argument("--cfd-json", default=None,
+                    help='extra Part 2 run_half_car_cfd options, e.g. \'{"turbulence_model": "kOmegaSSTLM"}\'')
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
+    a = parse_args(argv)
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    import assembly as p4
+    import legality
+
+    S = {"scalars": {"W": a.W, "x_front": a.x_front, "d_halo": a.d_halo},
+         "args": vars(a)}
+    log("1-2 BODY + PARTS: parametric body sized against the manufactured parts")
+    p4kw = part4_kwargs(a)
+    geom, S["body"], asm = build_car(a, out, **dict(p4kw))
+    S["wheels"] = asm["wheel_design"]
+    S["parts_mass_g"] = asm["parts_mass_g"]
+
+    b = make_bindings(a, out, asm)
+    ms = mass_state(b, geom)
+    ms["manufactured_mass_g"] = manufactured_mass_kg(asm) * 1e3
+    S["mass"] = {k: v for k, v in ms.items() if not k.startswith("_")}
+    # Even triangles in the files that get made, once sizing has settled.
+    import mesh_fairing
+    for name, part in asm["joints"]["manufactured"].items():
+        if "file" in part:
+            part.update(mesh_fairing.remesh_file(part["file"], 0.6 if name == "machined_body" else 0.4))
+    S["manufactured"] = asm["joints"]["manufactured"]
+    if a.ballast_g:
+        import ballast as _b
+        S["mass"].update(ballast_g=a.ballast_g, capacity_g=_b.capacity_kg("lead") * 1e3)
+    asm["cargo_placement"] = geom.landmarks.get("cargo_placement")
+
+    log("3 LEGAL")
+    chk = legality.check(str(out / "body_half.stl"), asm, S["mass"], S["body"]["field_bodies"],
+                         machined_stl=asm["joints"].get("machined_body_half_stl"))
+    S["legality"] = {"checks": chk, "summary": legality.summary(chk)}
+
+    # A fixed skin is not sized for T3.6, so that one rule cannot count against it.
+    broken = [f for f in S["legality"]["summary"]["failed"]
+              if not (f == "T3.6_mass" and getattr(a, "skin_mm", None) is not None)]
+    if a.cfd and a.cfd_if_legal and broken:
+        log(f"4 CFD skipped: the car broke {broken}")
+    elif a.cfd:
+        log("4 CFD: forward, all patches")
+        # The same decimated STL the optimiser's gate would mesh.
+        gate = b.run_quality_gates(copy.deepcopy(geom), "initial", str(out / "gates"))
+        if not gate.stl_half_path:
+            raise SystemExit(f"initial body failed the CFD gate: {gate.failure_reason}")
+        S["cfd_initial"] = cfd_and_objective(b, Path(gate.stl_half_path), ms, asm, a)
+
+    S["recommendations"] = recommend(S["legality"]["checks"], S.get("cfd_initial"))
+    (out / "summary.json").write_text(json.dumps(S, indent=2, default=str))
+    write_report(out, S)
+    log(f"done: {S['legality']['summary']}")
+    return S
+
+
+if __name__ == "__main__":
+    main()
