@@ -1,0 +1,282 @@
+{
+ "_about": "Every physical input the code uses. Written by measure/*.py and the agent when processing a raw lab folder (bible Part 3). measured=false means a placeholder; every report lists those.",
+ "thrust_csv": {
+  "value": "part2-simulation/co2_thrust_data.csv",
+  "sd": null,
+  "unit": "path",
+  "measured": false,
+  "source": "synthetic curve in the repository; about 60% of a real cartridge's impulse (bible 0.2)",
+  "date": null,
+  "n": 0
+ },
+ "impulse_Ns": {
+  "value": 1.214,
+  "sd": null,
+  "unit": "N s",
+  "measured": false,
+  "source": "integral of the synthetic curve",
+  "date": null,
+  "n": 0
+ },
+ "peak_N": {
+  "value": 8.52,
+  "sd": null,
+  "unit": "N",
+  "measured": false,
+  "source": "synthetic curve",
+  "date": null,
+  "n": 0
+ },
+ "trigger_delay_ms": {
+  "value": 0.0,
+  "sd": null,
+  "unit": "ms",
+  "measured": false,
+  "source": "not modelled",
+  "date": null,
+  "n": 0
+ },
+ "charge_mass_g": {
+  "value": 7.98,
+  "sd": null,
+  "unit": "g",
+  "measured": false,
+  "source": "propellant column of the synthetic curve (7.98 g at t=0)",
+  "date": null,
+  "n": 0
+ },
+ "cartridge_shell_g": {
+  "value": 21.15,
+  "sd": null,
+  "unit": "g",
+  "measured": false,
+  "source": "geometry_contract.CO2_MASS_KG: regulation full mass 28.9-29.4 g, mid-range, less 8 g",
+  "date": null,
+  "n": 0
+ },
+ "foam_density_gcm3": {
+  "value": 0.163,
+  "sd": 0.005,
+  "unit": "g/cm3",
+  "measured": false,
+  "source": "code default at commit 3332323 (geometry_contract.DENSITY_BODY_KGM3)",
+  "date": null,
+  "n": 0
+ },
+ "foam_compressive_strength_MPa": {
+  "value": null,
+  "sd": null,
+  "unit": "MPa",
+  "measured": false,
+  "source": "not measured",
+  "date": null,
+  "n": 0
+ },
+ "pa12_density_gcm3": {
+  "value": 1.01,
+  "sd": 0.03,
+  "unit": "g/cm3",
+  "measured": false,
+  "source": "code default at commit 3332323 (wheel.PA12_G_CM3)",
+  "date": null,
+  "n": 0
+ },
+ "pla_density_gcm3": {
+  "value": 1.24,
+  "sd": 0.03,
+  "unit": "g/cm3",
+  "measured": false,
+  "source": "typical datasheet value",
+  "date": null,
+  "n": 0
+ },
+ "glue_g_per_joint": {
+  "value": 0.0,
+  "sd": 0.05,
+  "unit": "g",
+  "measured": false,
+  "source": "not modelled",
+  "date": null,
+  "n": 0
+ },
+ "bearing_g": {
+  "value": 0.3,
+  "sd": null,
+  "unit": "g",
+  "measured": false,
+  "source": "code default at commit 3332323 (wheel.BEARING_G)",
+  "date": null,
+  "n": 0
+ },
+ "decal_paint_g": {
+  "value": 0.0,
+  "sd": 0.1,
+  "unit": "g",
+  "measured": false,
+  "source": "not modelled",
+  "date": null,
+  "n": 0
+ },
+ "mu_roll": {
+  "value": 0.01,
+  "sd": 0.005,
+  "unit": "-",
+  "measured": false,
+  "source": "code default at commit 3332323 (physics_contract.DEFAULT_ROLLING_MU), a placeholder",
+  "date": null,
+  "n": 0
+ },
+ "R0_N": {
+  "value": 0.0,
+  "sd": null,
+  "unit": "N",
+  "measured": false,
+  "source": "not modelled",
+  "date": null,
+  "n": 0
+ },
+ "bearing_tau0_Nm": {
+  "value": 0.0,
+  "sd": null,
+  "unit": "N m",
+  "measured": false,
+  "source": "not modelled",
+  "date": null,
+  "n": 0
+ },
+ "bearing_k_Nms": {
+  "value": 0.0,
+  "sd": null,
+  "unit": "N m s",
+  "measured": false,
+  "source": "not modelled",
+  "date": null,
+  "n": 0
+ },
+ "wheel_I_front_kgm2": {
+  "value": 1.2317e-07,
+  "sd": null,
+  "unit": "kg m2",
+  "measured": false,
+  "source": "wheel.design(): front STL x PA12 density, plus bearing",
+  "date": null,
+  "n": 0
+ },
+ "wheel_I_rear_kgm2": {
+  "value": 1.5039e-07,
+  "sd": null,
+  "unit": "kg m2",
+  "measured": false,
+  "source": "wheel.design(): rear STL x PA12 density, plus bearing",
+  "date": null,
+  "n": 0
+ },
+ "wheel_mass_front_g": {
+  "value": 1.152,
+  "sd": null,
+  "unit": "g",
+  "measured": false,
+  "source": "wheel.design()",
+  "date": null,
+  "n": 0
+ },
+ "wheel_mass_rear_g": {
+  "value": 1.293,
+  "sd": null,
+  "unit": "g",
+  "measured": false,
+  "source": "wheel.design()",
+  "date": null,
+  "n": 0
+ },
+ "mu_guide": {
+  "value": 0.0,
+  "sd": null,
+  "unit": "-",
+  "measured": false,
+  "source": "not modelled; bible Part 4 uses 0.3 only as an illustration",
+  "date": null,
+  "n": 0
+ },
+ "tow_force_N": {
+  "value": null,
+  "sd": null,
+  "unit": "N",
+  "measured": false,
+  "source": "not measured",
+  "date": null,
+  "n": 0
+ },
+ "air_density_kgm3": {
+  "value": 1.225,
+  "sd": null,
+  "unit": "kg/m3",
+  "measured": false,
+  "source": "ISA sea level 15 C; a hall at 25-30 C is about 1.16-1.18",
+  "date": null,
+  "n": 0
+ },
+ "track_noise_s": {
+  "value": null,
+  "sd": null,
+  "unit": "s",
+  "measured": false,
+  "source": "not measured",
+  "date": null,
+  "n": 0
+ },
+ "launch_observation": {
+  "value": null,
+  "sd": null,
+  "unit": "text",
+  "measured": false,
+  "source": "not observed",
+  "date": null,
+  "n": 0
+ },
+ "sanding_loss_mm": {
+  "value": 0.0,
+  "sd": 0.1,
+  "unit": "mm",
+  "measured": false,
+  "source": "not modelled",
+  "date": null,
+  "n": 0
+ },
+ "glue_gap_mm": {
+  "value": 0.15,
+  "sd": null,
+  "unit": "mm",
+  "measured": false,
+  "source": "code default at commit 3332323 (joints.GLUE_GAP_MM, marked UNMEASURED there)",
+  "date": null,
+  "n": 0
+ },
+ "tool_stickout_mm": {
+  "value": null,
+  "sd": null,
+  "unit": "mm",
+  "measured": false,
+  "source": "not measured; machining assumes an infinitely long tool",
+  "date": null,
+  "n": 0
+ },
+ "holder_diameter_mm": {
+  "value": null,
+  "sd": null,
+  "unit": "mm",
+  "measured": false,
+  "source": "not measured",
+  "date": null,
+  "n": 0
+ },
+ "drag_exp": {
+  "value": 0.0,
+  "sd": null,
+  "unit": "-",
+  "measured": false,
+  "source": "drag scaled as v^2 from 20 m/s; bible Part 6 section 6.8 measures it",
+  "date": null,
+  "n": 0
+ }
+}

@@ -273,7 +273,7 @@ Notes on the method:
 - **Propellant mass:** assumed to leave in proportion to impulse delivered (constant effective exhaust velocity). This is standard and its error is small because the propellant is about 10% of the car's mass and leaves within about 0.3 s. The summary reports the implied exhaust velocity; a value between about 150 and 300 m/s is plausible for CO2 from a small orifice. Outside that range, check the charge mass or calibration.
 - **Thrust in the car versus on a fixed rig:** the car moves away from the striker during the first milliseconds, which can change how the seal tears. The fixed rig is the standard approach; M9 (timed runs) is the check that catches any difference.
 
-Test (`measure/tests/test_thrust.py`): generate a synthetic run (baseline noise, onset at 0.4 s, F(t) = 9.2 e^(−t/0.25) for 0.5 s, sampled at 2 kHz, plus a 700 Hz ring), write calibration and run files to a temp folder, run the processing, assert impulse within 2% of the analytic 9.2 × 0.25 × (1 − e^(−2)) = 1.989 N·s and peak within 5% of 9.2 N.
+Test (`measure/tests/test_measure.py`): generate synthetic runs (baseline noise, onset at 0.4 s, F(t) = 9.2 e^(−t/0.25)(1 − e^(−t/0.005)) for 0.5 s, i.e. a realistic 5 ms rise, sampled at 2 kHz, plus a 700 Hz ring), write calibration and run files to a temp folder, run the processing, and assert impulse within 2% and peak within 3% of the curve's own exact values. An instantaneous step from zero is not used: the zero-phase filter overshoots a true step by about 7%, and no cartridge produces one.
 
 ### 3.4.7 Acceptance
 
