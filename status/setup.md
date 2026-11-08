@@ -31,3 +31,4 @@ Updated: 2026-11-08
 ## Gate
 - [x] Part 2 exit gate (except "pull request merged by the user": the base branch is open as a PR).
 - Fixed a test that already failed on the original code: `body/unified_phi.py` build rules used unrounded y coordinates, so the nose stub kept a column on one side only (`test_masks_and_labels_are_exactly_symmetric`). Golden G1 unchanged.
+- CI on `rebuild/bible` at 1baa98f: every test shard and the golden check pass on Linux; the container image builds (`image.yml` run 42471594877, digest `sha256:8e03640afc61c8a15eeabf6a43d09ba400f33c21417f46737b72d7e82ee6eb0c`, pushed to `ghcr.io/shawshanker18/stem-cfd`, still private). Chat A: put that digest in `compute/accounts.json`, ask the user to make the package public, then continue Part 1 from step 5.
