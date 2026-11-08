@@ -24,7 +24,7 @@ tooling). You work autonomously until your "Done means" list is true, testing ev
    python -m venv .venv && .venv/Scripts/python -m pip install -r docker/requirements.lock
    ```
 
-3. Read, in order: `bible/BRIEFING.md`, `bible/00_START_HERE.md`, `agents/COMMON.md`,
+3. Read, in order: `bible/BRIEFING.md`, `status/setup.md` (what is already done), `bible/00_START_HERE.md`, `agents/COMMON.md`,
    `bible/05_RULES_LEGALITY_MASS.md` (your Part; section 5.1.1 has the regulation answers already
    read from the PDF). Skim `bible/REVIEW.md` sections 1.5. Your status file is `status/rules.md`.
 4. The regulations PDF is in the private repository `shawshanker18/part1-simulation`, branch

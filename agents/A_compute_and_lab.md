@@ -26,7 +26,7 @@ everything you build.
    python -m venv .venv && .venv/Scripts/python -m pip install -r docker/requirements.lock
    ```
 
-3. Read, in order: `bible/BRIEFING.md`, `bible/00_START_HERE.md`, `agents/COMMON.md`,
+3. Read, in order: `bible/BRIEFING.md`, `status/setup.md` (what is already done), `bible/00_START_HERE.md`, `agents/COMMON.md`,
    `bible/01_COMPUTE_AND_ACCOUNTS.md`, `bible/03_PHYSICAL_MEASUREMENTS.md`,
    `bible/04_RACE_MODEL.md`. Follow COMMON.md for git, tests, ownership and the status file
    `status/compute-lab.md`.
@@ -50,9 +50,9 @@ been run. Make it work end to end:
    to `compute/confirmations/part1.json` and the caps to `compute/accounts.json`.
 2. Check every confirmed account in `gh auth status` has the `workflow` scope (Part 1 section
    1.4). Several accounts are already logged in on this computer; use only confirmed ones.
-3. Build the container image with `image.yml` (push a commit touching `docker/` on your branch;
-   the workflow's `push: paths` trigger runs it). Fix the Dockerfile until it builds and its smoke
-   test passes. Put the digest into `compute/accounts.json`.
+3. The container image already builds (see `status/setup.md` for the run and its digest). Put
+   that digest into `compute/accounts.json`. If you change `docker/`, the `image.yml` workflow
+   rebuilds on push; use the new digest.
 4. Ask the user to make the package public (Part 1 section 1.6.3). Verify from another account.
 5. `python compute/setup_compute_repos.py --part 1`; then the self-test batch (one `selftest` and
    one `car` case with medium CFD per account); `dispatch.py` then `collect.py --wait` (run it in

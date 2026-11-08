@@ -25,7 +25,7 @@ real search the moment the CFD and rules work is finished. You do **not** run re
    python -m venv .venv && .venv/Scripts/python -m pip install -r docker/requirements.lock
    ```
 
-3. Read, in order: `bible/BRIEFING.md`, `bible/00_START_HERE.md`, `agents/COMMON.md`,
+3. Read, in order: `bible/BRIEFING.md`, `status/setup.md` (what is already done), `bible/00_START_HERE.md`, `agents/COMMON.md`,
    `bible/07_SEARCH.md` (your Part), `bible/01_COMPUTE_AND_ACCOUNTS.md` sections 1.8-1.10 (batch
    files, dispatch, collect), `bible/06_CFD_STOPWATCH.md` sections 6.2, 6.5 and 6.10 (what the
    CFD job kinds return). Your status file is `status/search.md`.

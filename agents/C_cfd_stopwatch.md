@@ -24,7 +24,7 @@ tooling). You work autonomously until your "Done means" list is true, testing ev
    python -m venv .venv && .venv/Scripts/python -m pip install -r docker/requirements.lock
    ```
 
-3. Read, in order: `bible/BRIEFING.md`, `bible/00_START_HERE.md`, `agents/COMMON.md`,
+3. Read, in order: `bible/BRIEFING.md`, `status/setup.md` (what is already done), `bible/00_START_HERE.md`, `agents/COMMON.md`,
    `bible/06_CFD_STOPWATCH.md` (your Part), `bible/01_COMPUTE_AND_ACCOUNTS.md` sections 1.7-1.10
    (how jobs run). Your status file is `status/cfd.md`.
 
