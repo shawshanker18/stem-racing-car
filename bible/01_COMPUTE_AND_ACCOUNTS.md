@@ -95,7 +95,7 @@ If missing or older:
 - macOS: `brew install gh`
 - Ubuntu/Debian: follow https://github.com/cli/cli/blob/trunk/docs/install_linux.md
 
-Also needed on the coordinator machine: `git`, Python 3.11+, `zstd` (for mesh tarballs).
+Also needed on the coordinator machine: `git`, Python 3.12+ (3.13 matches the image), `zstd` (for mesh tarballs).
 
 ---
 
@@ -234,11 +234,11 @@ RUN apt-get update \
       libgl1 libglu1-mesa libegl1 libopengl0 libgomp1 libxkbcommon0 \
  && rm -rf /var/lib/apt/lists/*
 
-# Python 3.11 via uv, independent of the base image's system Python
-# (numpy 2.4 needs >= 3.11; the base image's python3 may be older).
+# Python 3.13 via uv: the version docker/requirements.lock was resolved and tested with
+# (some locked packages need >= 3.12; the base image's python3 is older).
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
- && uv python install 3.11 \
- && uv venv -p 3.11 /opt/venv
+ && uv python install 3.13 \
+ && uv venv -p 3.13 /opt/venv
 COPY docker/requirements.lock /tmp/requirements.lock
 RUN uv pip install --python /opt/venv/bin/python --no-cache -r /tmp/requirements.lock
 
