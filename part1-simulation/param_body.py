@@ -235,7 +235,7 @@ def build(W_mm: float, x_front_mm: float, d_halo_mm: float, bp: BodyParams,
       thinned, the design intent kept) until the machined body weighs this.
     """
     import unified_phi as up
-    from phi_updater import reinitialise_sdf
+    from sdf import reinitialise_sdf
     import machining
     base = up.build_unified_geometry(W_mm, x_front_mm, d_halo_mm, init_mode="full")
     # Read at call time: sandbox/coarse.use_spacing rewrites the module globals,

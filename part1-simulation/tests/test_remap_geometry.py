@@ -33,11 +33,15 @@ def _run(fn):
 
 
 def _carve(geom, n, up):
-    """Erode the field a little so the shape is NOT the trivial full brick."""
-    from phi_updater import hj_update, cfl_limited_dt, reinitialise_sdf
+    """Erode the field a little so the shape is NOT the trivial full brick: shift the
+    distance field outward by half a cell per step (a uniform inward surface move),
+    then redistance. Was a uniform-velocity Hamilton-Jacobi step, retired with carving."""
+    from sdf import reinitialise_sdf
+    from geometry_contract import GRID_SPACING_M
     for _ in range(n):
-        vel = np.full(geom.phi.grid.shape, -1.0)   # uniform inward
-        hj_update(geom.phi, vel, cfl_limited_dt(vel, 0.5))
+        geom.phi.grid[...] = geom.phi.grid + 0.5 * GRID_SPACING_M
+        geom.phi.grid[geom.phi.hard_mask_solid] = np.minimum(geom.phi.grid[geom.phi.hard_mask_solid], -GRID_SPACING_M)
+        geom.phi.grid[geom.phi.hard_mask_air] = np.maximum(geom.phi.grid[geom.phi.hard_mask_air], GRID_SPACING_M)
         reinitialise_sdf(geom.phi, n_steps=3)
         up.enforce_symmetry(geom)
     return geom

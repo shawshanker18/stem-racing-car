@@ -34,7 +34,7 @@ def _make_phi(comp="main_body", shape=(30, 30, 30), mode="sphere"):
 
 def test_B1_reinit_no_nan_30_cubed():
     """SDF reinit on 30^3 grid must not produce NaN or Inf (the original bug)."""
-    from phi_updater import reinitialise_sdf, _grad_magnitude
+    from sdf import reinitialise_sdf, _grad_magnitude
     phi = _make_phi(shape=(30, 30, 30))
     reinitialise_sdf(phi, n_steps=50)
     assert not np.any(np.isnan(phi.grid)), "NaN after reinit — float overflow bug is back"
@@ -43,7 +43,7 @@ def test_B1_reinit_no_nan_30_cubed():
 
 def test_B1_reinit_gradient_near_one():
     """After reinit, |grad phi| interior mean should be within 20% of 1.0."""
-    from phi_updater import reinitialise_sdf, _grad_magnitude
+    from sdf import reinitialise_sdf, _grad_magnitude
     phi = _make_phi(shape=(30, 30, 30))
     reinitialise_sdf(phi, n_steps=50)
     interior = ~(phi.hard_mask_solid | phi.hard_mask_air)
@@ -54,7 +54,7 @@ def test_B1_reinit_gradient_near_one():
 
 def test_B1_reinit_hard_constraints_hold():
     """Hard constraints must hold after SDF reinitialisation."""
-    from phi_updater import reinitialise_sdf
+    from sdf import reinitialise_sdf
     phi = _make_phi(shape=(25, 25, 25))
     reinitialise_sdf(phi, n_steps=30)
     assert (phi.grid[phi.hard_mask_solid] < 0).all(), "Solid constraint violated after reinit"

@@ -68,7 +68,7 @@ def reachable_air(A, r):
 
 def make_machinable(geom, tool_r_mm: float = TOOL_R_MM, max_iter: int = 4) -> dict:
     import unified_phi as up
-    from phi_updater import reinitialise_sdf
+    from sdf import reinitialise_sdf
     phi = geom.phi
     d_mm = up.GRID_SPACING_M * 1e3
     r = tool_r_mm / d_mm

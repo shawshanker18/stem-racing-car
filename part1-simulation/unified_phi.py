@@ -874,7 +874,7 @@ def remap_geometry(
     matches prev_geom's, with all hard constraints freshly applied.
     """
     from scipy.ndimage import map_coordinates
-    from phi_updater import reinitialise_sdf
+    from sdf import reinitialise_sdf
 
     src_dx = prev_geom.spacing_m or GRID_SPACING_M
     W_mm = prev_geom.W_mm if W_mm is None else W_mm

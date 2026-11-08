@@ -24,7 +24,7 @@ _SPACING_CONSUMERS = (
     "halo_pocket",
     "mass_com_calculator",
     "phi_grid",
-    "phi_updater",
+    "sdf",
     "surface_extraction",
     "unified_phi",
     "virtual_cargo",
