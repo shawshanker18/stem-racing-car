@@ -1,4 +1,8 @@
-from dispatch import split
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from dispatch import split  # noqa: E402
 
 
 def test_split_covers_every_id_once_and_respects_weights():

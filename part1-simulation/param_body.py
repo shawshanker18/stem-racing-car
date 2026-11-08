@@ -19,7 +19,7 @@ Shape, all in mm, car coordinates (x nose->tail, z up from the track):
              Ref A; the nose cone ahead of it is a printed part (Part 4).
   sidepods   a second, wide and low superellipse loft over [s_x0, s_x1] with
              `s_taper` mm ease at each end: what encloses the 52 mm T4.2 cargo.
-  modes      32 smooth bumps (+) or dents (-) on the fuselage, mm.
+  modes      56 smooth bumps (+) or dents (-), mm: 32 on the fuselage, 24 on the sidepods.
 """
 from __future__ import annotations
 

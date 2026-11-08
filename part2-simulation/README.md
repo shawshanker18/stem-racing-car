@@ -6,17 +6,17 @@
 |---|---|
 | **What it is** | Airflow simulation for a half car, and the race time model that turns drag into seconds. |
 | **Source** | Private |
-| **Public overview** | https://github.com/Shashanksaraswat123939/stem-racing-overview |
+| **Public overview** | https://github.com/shawshanker18/stem-racing-car |
 
 **The STEM Racing set**
 
 | Part | Repository |
 |---|---|
-| 1 | [part1-simulation](https://github.com/Shashanksaraswat123939/part1-simulation) |
-| 2 | [part2-simulation](https://github.com/Shashanksaraswat123939/part2-simulation) |
-| 3 | [part3-simulation](https://github.com/Shashanksaraswat123939/part3-simulation) |
-| 4 | [part4-simulation](https://github.com/Shashanksaraswat123939/part4-simulation) |
-| 5 | [part5-simulation](https://github.com/Shashanksaraswat123939/part5-simulation) |
+| 1 | [part1-simulation](https://github.com/shawshanker18/part1-simulation) |
+| 2 | [part2-simulation](https://github.com/shawshanker18/part2-simulation) |
+| 3 | [part3-simulation](https://github.com/shawshanker18/part3-simulation) (retired: its live code moved to part5 `pipeline.py`) |
+| 4 | [part4-simulation](https://github.com/shawshanker18/part4-simulation) |
+| 5 | [part5-simulation](https://github.com/shawshanker18/part5-simulation) |
 
 ---
 
@@ -27,7 +27,7 @@
 | `openfoam_adjoint.py` | the adjoint case (`adjointOptimisationFoam`, frozen turbulence); it failed its gradient check on this car (right sign 3 of 8 modes), so the search uses direct CFD |
 | `race_objective.py` | the locked, differentiable race-time model (JAX): thrust curve, rolling and aero drag, wheel inertia. Its hash is in `race_objective_hash.txt` |
 | `race_objective_adapter.py`, `adjoint_contract.py` | the objective's parameter vector, guarded evaluation, and the drag weight dT/dD20 |
-| `physics_contract.py`, `mass_com_ingest.py`, `candidate_record.py` | units and the half-car contract, mass and COM of the whole car, one JSON record per candidate |
+| `physics_contract.py`, `mass_com_ingest.py` | units and the half-car contract, mass and COM of the whole car |
 
 Resolutions (`resolution=`): `coarse`, `medium` (the search, ~0.65 M cells with the wake
 boxes), `fine`, `resolved` (~5 M cells, wall-resolved).

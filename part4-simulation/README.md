@@ -6,17 +6,17 @@
 |---|---|
 | **What it is** | Wheels, wings, supports, nose and joints, with their rule checks and manufacturing files. |
 | **Source** | Private |
-| **Public overview** | https://github.com/Shashanksaraswat123939/stem-racing-overview |
+| **Public overview** | https://github.com/shawshanker18/stem-racing-car |
 
 **The STEM Racing set**
 
 | Part | Repository |
 |---|---|
-| 1 | [part1-simulation](https://github.com/Shashanksaraswat123939/part1-simulation) |
-| 2 | [part2-simulation](https://github.com/Shashanksaraswat123939/part2-simulation) |
-| 3 | [part3-simulation](https://github.com/Shashanksaraswat123939/part3-simulation) |
-| 4 | [part4-simulation](https://github.com/Shashanksaraswat123939/part4-simulation) |
-| 5 | [part5-simulation](https://github.com/Shashanksaraswat123939/part5-simulation) |
+| 1 | [part1-simulation](https://github.com/shawshanker18/part1-simulation) |
+| 2 | [part2-simulation](https://github.com/shawshanker18/part2-simulation) |
+| 3 | [part3-simulation](https://github.com/shawshanker18/part3-simulation) (retired: its live code moved to part5 `pipeline.py`) |
+| 4 | [part4-simulation](https://github.com/shawshanker18/part4-simulation) |
+| 5 | [part5-simulation](https://github.com/shawshanker18/part5-simulation) |
 
 ---
 

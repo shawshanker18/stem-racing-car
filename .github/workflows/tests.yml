@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  PY_DEPS: pytest numpy==2.4.6 scipy==1.17.1 pandas trimesh==5.2.0 scikit-image shapely rtree==1.4.1 mapbox-earcut manifold3d==3.5.4 fast_simplification==0.2.0 jax jaxlib matplotlib pymeshlab==2025.7.post1
+  PY_DEPS: pytest scikit-learn pyamg numpy==2.4.6 scipy==1.17.1 pandas trimesh==5.2.0 scikit-image shapely rtree==1.4.1 mapbox-earcut manifold3d==3.5.4 fast_simplification==0.2.0 jax jaxlib matplotlib pymeshlab==2025.7.post1
 
 jobs:
   tests:
@@ -25,9 +25,11 @@ jobs:
           - { part: part1-simulation, shard: 2, of: 4 }
           - { part: part1-simulation, shard: 3, of: 4 }
           - { part: part2-simulation, shard: 0, of: 1 }
-          - { part: part3-simulation, shard: 0, of: 1 }
           - { part: part4-simulation, shard: 0, of: 1 }
           - { part: part5-simulation, shard: 0, of: 1 }
+          - { part: compute, shard: 0, of: 1 }
+          - { part: measure, shard: 0, of: 1 }
+          - { part: search, shard: 0, of: 1 }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -44,6 +46,23 @@ jobs:
         run: |
           files=$(ls tests/test_*.py | awk -v s=${{ matrix.shard }} -v n=${{ matrix.of }} 'NR % n == s')
           python -m pytest $files -q -p no:cacheprovider --tb=short -W ignore
+
+  golden:
+    # The reference car must come out byte-identical unless a commit says why it changed
+    # (bible Part 2 section 2.2). Update golden/G1.fp.json on purpose, never to make this pass.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Libraries the remesher needs
+        run: (for i in 1 2 3 4 5 6; do timeout 90 sudo apt-get update -q && break; done) && sudo apt-get install -y -q libopengl0 libglu1-mesa libegl1 libgl1 libgomp1 libxkbcommon0
+      - run: pip install $PY_DEPS
+      - working-directory: part5-simulation
+        run: |
+          python -W ignore run_car.py --out ../out/G1 --body-json '{}' --skin-mm 3.93
+          python checks/golden.py compare ../golden/G1.fp.json ../out/G1
 
   car:
     runs-on: ubuntu-24.04
