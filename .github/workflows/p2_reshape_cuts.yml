@@ -11,6 +11,7 @@ on:
       label: { required: true }
       iters: { default: "1000" }
       opt: { default: '{"layer_overrides": {"nSurfaceLayers": 0}}' }
+      cuts: { default: '["nose_0.5", "nose_2", "sidepod_0.5", "sidepod_2", "rear_0.5", "rear_2"]' }
 
 permissions:
   contents: read
@@ -72,9 +73,9 @@ jobs:
     timeout-minutes: 350
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 10
       matrix:
-        cut: ["nose_0.5", "nose_2", "sidepod_0.5", "sidepod_2", "rear_0.5", "rear_2"]
+        cut: ${{ fromJSON(inputs.cuts) }}
         mode: ["fresh", "morph"]
     steps:
       - uses: actions/checkout@v4
