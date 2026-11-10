@@ -80,7 +80,7 @@ def test_morph_writes_the_displacement_and_restores_the_case(tmp_path, monkeypat
     oc._morph(run, cfg, "bashrc", 60)
     cmds = [c for c, _ in seen]
     assert cmds == ["foamFormatConvert -constant -noFunctionObjects", "moveMesh -noFunctionObjects", "pd"]
-    assert "writeFormat     ascii;" in seen[0][1]
+    assert "writeFormat     ascii;" in seen[0][1] and "writePrecision  16;" in seen[0][1]
     pd = dict(seen)["pd"]
     assert "type            fixedValue;" in pd and "nonuniform List<vector> 5" in pd
     assert pd.count("1.000000000e-03)") == 5                    # every car point up by 1 mm
