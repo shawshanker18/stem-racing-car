@@ -142,3 +142,16 @@ def test_a_bad_reshape_falls_back_to_a_fresh_mesh_and_says_so(tmp_path, monkeypa
                        " ***Error in face pyramids: 1 faces are incorrectly oriented.\nFailed 1 mesh checks.\n")
     assert calls == ["morph", "checkMesh", "blockMesh", "snappyHexMesh -overwrite", "checkMesh"]
     assert "incorrectly oriented" in (tmp_path / "MORPH_FALLBACK").read_text()
+
+
+def test_smoothing_removes_a_point_jump_but_keeps_a_smooth_change():
+    rng = np.random.default_rng(0)
+    pts = np.c_[rng.uniform(0, 0.02, 4000), rng.uniform(0, 0.02, 4000), np.zeros(4000)]
+    smooth = np.c_[np.zeros(4000), np.zeros(4000), 1e-3 * np.exp(-np.sum((pts - 0.01) ** 2, 1) / (2 * 0.008 ** 2))]
+    spiky = smooth.copy()
+    spiky[0, 2] += 5e-4                                            # one point jumps 0.5 mm
+    out = oc.smooth_displacement(pts, spiky, oc.MORPH_SMOOTH_M)
+    assert abs(out[0, 2] - smooth[0, 2]) < 0.3 * 5e-4              # the jump is mostly gone
+    inner = np.all((pts[:, :2] > 0.002) & (pts[:, :2] < 0.018), axis=1)
+    assert np.abs(oc.smooth_displacement(pts, smooth, oc.MORPH_SMOOTH_M) - smooth)[inner, 2].max() < 3e-5   # < 3 % of a 1 mm cut
+    assert oc.largest_jumps(pts, spiky, 1)[0][0] > 10 * oc.largest_jumps(pts, smooth, 1)[0][0]

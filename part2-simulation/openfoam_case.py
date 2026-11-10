@@ -1499,7 +1499,7 @@ def patch_mesh_points(faces: list, start: int, n: int) -> list:
     return order
 
 
-def surface_change(points: np.ndarray, ref_stl: str, new_stl: str) -> np.ndarray:
+def surface_change(points: np.ndarray, ref_stl: str, new_stl: str, sigma: float = None) -> np.ndarray:
     """Per point: nearest point on new_stl minus nearest point on ref_stl. Points
     on the symmetry plane keep y = 0."""
     import trimesh
@@ -1507,8 +1507,43 @@ def surface_change(points: np.ndarray, ref_stl: str, new_stl: str) -> np.ndarray
     new = trimesh.load(new_stl, force="mesh")
     d = (trimesh.proximity.closest_point(new, points)[0]
          - trimesh.proximity.closest_point(ref, points)[0])
+    d = smooth_displacement(points, d, MORPH_SMOOTH_M if sigma is None else sigma)
     d[np.abs(points[:, 1]) < 1e-9, 1] = 0.0
     return d
+
+
+# Neighbouring points near a sharp edge can find their nearest surface points on
+# different faces of the old and the new STL, so the raw change jumps between
+# them although the real shape change is smooth; that folded one face on every
+# reshaped local cut (a zero move folds none, 2026-11-10). A Gaussian average
+# over this radius scale removes the jumps; carved shapes change over >= 6 mm
+# (the ball end's radius), so the surface itself moves by less than a micron.
+MORPH_SMOOTH_M = 5e-4
+
+
+def smooth_displacement(points: np.ndarray, d: np.ndarray, sigma: float) -> np.ndarray:
+    """Gaussian-weighted average of d over points within 3 sigma (sigma <= 0: unchanged)."""
+    if sigma <= 0 or len(points) == 0:
+        return d
+    from scipy.spatial import cKDTree
+    tree = cKDTree(points)
+    out = np.empty_like(d)
+    for i, nb in enumerate(tree.query_ball_point(points, 3 * sigma)):
+        w = np.exp(-np.sum((points[nb] - points[i]) ** 2, axis=1) / (2 * sigma * sigma))
+        out[i] = w @ d[nb] / w.sum()
+    return out
+
+
+def largest_jumps(points: np.ndarray, d: np.ndarray, k: int = 5) -> list:
+    """The k biggest changes of displacement between a point and its nearest
+    neighbour, |dd| / |dx|, with where they are (for the morph log)."""
+    from scipy.spatial import cKDTree
+    if len(points) < 2:
+        return []
+    dist, j = cKDTree(points).query(points, k=2)
+    ratio = np.linalg.norm(d - d[j[:, 1]], axis=1) / np.maximum(dist[:, 1], 1e-12)
+    top = np.argsort(ratio)[::-1][:k]
+    return [(float(ratio[i]), tuple(round(float(c) * 1e3, 2) for c in points[i])) for i in top]
 
 
 def morph_point_displacement(disp: np.ndarray) -> str:
@@ -1567,11 +1602,15 @@ def _morph(run: Path, cfg: OpenFOAMRunConfig, bashrc: str, timeout_s: int) -> No
         start, n = patch_range((dest / "boundary").read_text(), "car")
         labels = patch_mesh_points(read_ascii_faces((dest / "faces").read_text()), start, n)
         pts = read_ascii_points((dest / "points").read_text())[labels]
-        disp = surface_change(pts, str(ref_stl), str(run / "constant" / "triSurface" / "car.stl"))
+        raw = surface_change(pts, str(ref_stl), str(run / "constant" / "triSurface" / "car.stl"), sigma=0.0)
+        disp = smooth_displacement(pts, raw, MORPH_SMOOTH_M)
+        disp[np.abs(pts[:, 1]) < 1e-9, 1] = 0.0
         (run / "logs").mkdir(exist_ok=True)
         (run / "logs" / "morph_displacement.txt").write_text(
             f"points {len(disp)} max {np.abs(disp).max():.3e} m "
-            f"p99 {np.quantile(np.linalg.norm(disp, axis=1), 0.99):.3e} m\n")
+            f"p99 {np.quantile(np.linalg.norm(disp, axis=1), 0.99):.3e} m\n"
+            f"largest jumps raw (dd/dx, at mm): {largest_jumps(pts, raw)}\n"
+            f"largest jumps smoothed: {largest_jumps(pts, disp)}\n")
         _write(run / "constant" / "dynamicMeshDict",
                _header("dictionary", "dynamicMeshDict") + _MORPH_DYNAMIC_MESH)
         _write(run / "0" / "pointDisplacement", morph_point_displacement(disp))
