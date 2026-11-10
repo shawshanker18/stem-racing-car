@@ -1669,6 +1669,29 @@ def add_upstream_ground_entries(zero_dir: Path) -> None:
         f.write_text(text, encoding="utf-8")
 
 
+# REMESH RULE for a reshaped mesh. checkMesh's "***" lines differ in weight:
+# inverted faces, negative volumes, open cells and the like are fatal, but a
+# handful of highly skewed faces is a quality warning (OpenFOAM's own snapping
+# accepts internal skewness up to 4, and the fresh car meshes already reach 3.84).
+# A uniform 0.01 mm skin change pushed 1-2 faces to skewness 5.7-5.8 on every car
+# of a 16-car ladder (run 42804234820), so the rule tolerates that, within limits.
+MORPH_MAX_SKEW = 8.0
+MORPH_MAX_SKEW_FACES = 10
+
+
+def morph_mesh_acceptable(check: str) -> bool:
+    """True if checkMesh passed, or its only failure is a few moderately skewed faces."""
+    if "Mesh OK" in check:
+        return True
+    errors = [l.strip() for l in check.splitlines() if l.strip().startswith("***")]
+    if not errors or any("skew" not in e.lower() for e in errors):
+        return False
+    m = re.search(r"Max skewness = ([0-9.eE+-]+), (\d+) highly skew faces", check)
+    failed = re.search(r"Failed (\d+) mesh checks", check)
+    return bool(m and failed and int(failed.group(1)) == 1
+                and float(m.group(1)) <= MORPH_MAX_SKEW and int(m.group(2)) <= MORPH_MAX_SKEW_FACES)
+
+
 def _mesh(run: Path, cfg: OpenFOAMRunConfig, bashrc: str, timeout_s: int) -> str:
     """Snap (or morph) the mesh serially and return the checkMesh log.
 
@@ -1679,7 +1702,10 @@ def _mesh(run: Path, cfg: OpenFOAMRunConfig, bashrc: str, timeout_s: int) -> str
     if cfg.morph_from:
         _morph(run, cfg, bashrc, timeout_s)
         check = _run("checkMesh", run, bashrc, "checkMesh_morph.log", timeout_s)
-        if "Mesh OK" not in check:
+        if "Mesh OK" not in check and morph_mesh_acceptable(check):
+            _write(run / "MORPH_WARNING", "\n".join(
+                l.strip() for l in check.splitlines() if l.strip().startswith("***")) + "\n")
+        if not morph_mesh_acceptable(check):
             bad = [l.strip() for l in check.splitlines() if l.strip().startswith(("***", "Failed"))]
             _write(run / "MORPH_FALLBACK", "\n".join(bad or ["checkMesh did not report Mesh OK"]) + "\n")
             print(f"[openfoam_case] reshaped mesh failed checkMesh ({'; '.join(bad)[:200]}); meshing fresh")

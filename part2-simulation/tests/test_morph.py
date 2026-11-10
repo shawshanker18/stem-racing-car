@@ -155,3 +155,15 @@ def test_smoothing_removes_a_point_jump_but_keeps_a_smooth_change():
     inner = np.all((pts[:, :2] > 0.002) & (pts[:, :2] < 0.018), axis=1)
     assert np.abs(oc.smooth_displacement(pts, smooth, oc.MORPH_SMOOTH_M) - smooth)[inner, 2].max() < 3e-5   # < 3 % of a 1 mm cut
     assert oc.largest_jumps(pts, spiky, 1)[0][0] > 10 * oc.largest_jumps(pts, smooth, 1)[0][0]
+
+
+def test_remesh_rule_tolerates_a_few_skewed_faces_but_never_inverted_ones():
+    ok = oc.morph_mesh_acceptable
+    assert ok("...\nMesh OK.\n")
+    skew = (" ***Max skewness = 5.7316611, 1 highly skew faces detected which may impair the quality"
+            " of the results\n  <<Writing 1 skew faces to set skewFaces\nFailed 1 mesh checks.\n")
+    assert ok(skew)
+    assert not ok(skew.replace("5.7316611", "9.1"))                          # too skewed
+    assert not ok(skew.replace(", 1 highly", ", 40 highly"))                 # too many
+    assert not ok(" ***Error in face pyramids: 1 faces are incorrectly oriented.\nFailed 1 mesh checks.\n")
+    assert not ok(skew + " ***Zero or negative cell volume detected.\nFailed 2 mesh checks.\n")
