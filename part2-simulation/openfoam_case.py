@@ -1555,7 +1555,10 @@ def _morph(run: Path, cfg: OpenFOAMRunConfig, bashrc: str, timeout_s: int) -> No
     shutil.copytree(ref, dest)
     control = (run / "system" / "controlDict").read_text()
     solution = (run / "system" / "fvSolution").read_text()
-    ascii_control = re.sub(r"\nwriteFormat\s+\S+;", "\nwriteFormat     ascii;", control)
+    # ASCII at 16 significant digits: the default 8 rounded points enough to invert a
+    # thin cell (1 face on every reshaped local cut, even a 0.5 mm one, 2026-11-10)
+    ascii_control = re.sub(r"\nwritePrecision\s+\S+;", "\nwritePrecision  16;",
+                           re.sub(r"\nwriteFormat\s+\S+;", "\nwriteFormat     ascii;", control))
     try:
         # the copied mesh as ASCII, so its car patch points can be read here
         _write(run / "system" / "controlDict", ascii_control)
