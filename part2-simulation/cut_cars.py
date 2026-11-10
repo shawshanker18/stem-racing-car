@@ -47,10 +47,16 @@ def main(out: Path) -> None:
 
     out.mkdir(parents=True, exist_ok=True)
     g = cutter.start_block(LAYOUT)
-    cutter.save_field(g, out / "ref.npy")
     half = up.extract_half_surface(g)
     v = np.asarray(half.vertices, float)
     report = {}
+    # The reference must go through the same cut() machinery (milling for the 6.25 mm
+    # ball, thin strips, pinches) as the cut cars, or every cut car differs from it
+    # by that milling too (1.2 mm near x 75 mm in run rc6): a negligible cut does that.
+    g_ref, rep0 = cutter.cut(g, remove_here(v, centre(v, "nose")), half, step_m=1e-6,
+                             max_substeps=1, trust_radius_m=1e-6)
+    report["ref"] = {k: rep0.get(k) for k in ("status", "reason", "disp_p90_m")}
+    cutter.save_field(g_ref if rep0["status"] == "ok" else g, out / "ref.npy")
     for place, depth in CUTS:
         c = centre(v, place)
         d = depth / 1e3
