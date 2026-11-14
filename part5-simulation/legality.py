@@ -970,6 +970,13 @@ def manufactured_checks(assembly: dict) -> dict:
             # it gates only once traced (P4_WALL_GATE=1 turns it on).
             e = dict(e, pass_=e["pass"], **{"pass": True}, note="NOT GATING (validation pending): " + e["note"])
         r["P4.printed_min_wall"] = e
+    # The milled body: its thinnest wall straight across (an opposite face, so convex edges
+    # and corners are not counted), against the team's machining minimum, no tolerance.
+    body_file = parts.get("machined_body", {}).get("file")
+    if body_file and os.path.exists(body_file):
+        t, where = _min_wall_mm(body_file, n=8000)
+        r["machined_min_wall"] = _entry(t - rc.MACHINED_MIN_WALL_MM,
+                                        f"{t:.3f} mm at {where} (machining minimum {rc.MACHINED_MIN_WALL_MM} mm)")
     # T5.1-T5.4 and T5.6 are measured on the milled body in check().
     return r
 

@@ -32,3 +32,10 @@ def test_a_thin_spot_in_a_thick_part_is_found(tmp_path):
     m.export(str(p))
     t, where = lg._min_wall_mm(str(p), n=20000)
     assert abs(t - 0.4) < 0.01, t
+
+
+def test_machined_wall_just_inside_and_just_outside(tmp_path):
+    import rules_constants as rc
+    for t_mm, ok in ((3.0, True), (2.9, False)):
+        t, _ = lg._min_wall_mm(_plate(tmp_path, t_mm, f"b{t_mm}.stl"))
+        assert (t - rc.MACHINED_MIN_WALL_MM >= -1e-6) is ok, (t_mm, t)

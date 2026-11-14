@@ -56,3 +56,8 @@ CLAW_LIP_MM = 1.5
 
 # Shortest legal cartridge (Appendix vi, p54): 65.00 -0.5 mm.
 CARTRIDGE_LENGTH_MIN_MM = 64.5
+
+# Machining (team limit, relayed 2026-11-14): the thinnest foam wall the team mills.
+# Part 1's geometry_contract.MIN_MACHINED_WALL_MM carries the same value; the referee keeps
+# its own (it imports nothing from Part 1) and tests/test_independence.py checks they agree.
+MACHINED_MIN_WALL_MM = 3.0
