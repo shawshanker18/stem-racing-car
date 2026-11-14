@@ -95,6 +95,53 @@ if "hash" in (sys.argv[3] if len(sys.argv) > 3 else ""):   # hash: a hash of eve
             print("LAB hash", json.dumps({"seed": _seed, "car": _n[0] - 1, "file": str(p.relative_to(d)), "sha": h}), flush=True)
         return _rm(d, *a, **k)
     sc.shutil.rmtree = _rm_hash
+
+
+def _mesh_wall(path):
+    """The 3.0 mm wall measured on the real machined_body.stl, after the build has ended (so
+    the build's 12 GB guard does not hold it): (a) the ball test on 0.25 mm voxels, walls and
+    convex edges together, information only; (b) wall thickness straight across, a ray from
+    every vertex to the opposite face, counted when < 3.0 mm and that face is within 60 deg of
+    opposite (convex edges excluded)."""
+    import resource
+    import trimesh
+    from scipy import ndimage as nd
+    m = trimesh.load(path, force="mesh")
+    if m.bounds[1][0] < 1.0:
+        m.apply_scale(1e3)
+    pitch, r = 0.25, 1.5
+    vox = m.voxelized(pitch).fill()
+    A = vox.matrix
+    core = nd.distance_transform_edt(A) * pitch >= r
+    thin = A & ~(nd.distance_transform_edt(~core) * pitch <= r)
+    del core
+    lab, nlab = nd.label(thin)
+    ball = []
+    if nlab:
+        vols = nd.sum(thin, lab, range(1, nlab + 1)) * pitch ** 3
+        for i in np.argsort(-vols)[:6]:
+            idx = np.argwhere(lab == i + 1)
+            ball.append({"mm3": round(float(vols[i]), 2),
+                         "box": [np.round(vox.indices_to_points(idx.min(0)), 1).tolist(),
+                                 np.round(vox.indices_to_points(idx.max(0)), 1).tolist()]})
+    n = np.asarray(m.vertex_normals)
+    o = np.asarray(m.vertices) - n * 1e-3
+    loc, ri, ti = m.ray.intersects_location(o, -n, multiple_hits=False)
+    t = np.full(len(o), np.inf)
+    opp = np.zeros(len(o), bool)
+    t[ri] = np.linalg.norm(loc - o[ri], axis=1)
+    opp[ri] = (m.face_normals[ti] * n[ri]).sum(1) < -0.5
+    w = (t < 3.0) & opp
+    bins = {}
+    for q in np.round(np.asarray(m.vertices)[w] / 5.0) * 5.0:
+        k = tuple(q.tolist())
+        bins[k] = bins.get(k, 0) + 1
+    return {"ball_thin_mm3": round(float(thin.sum() * pitch ** 3), 2), "ball_regions": int(nlab), "ball_top": ball,
+            "wall_vertices": int(w.sum()), "of": len(o), "wall_min_mm": round(float(t[w].min()), 3) if w.any() else None,
+            "wall_top5mm": sorted(bins.items(), key=lambda b: -b[1])[:6],
+            "peak_gb": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6, 2)}
+
+
 seed, n = int(sys.argv[1]), int(sys.argv[2])
 MODE = sys.argv[3] if len(sys.argv) > 3 else ""     # nocorner | nobars: switch off one 11-Nov cutter change
 if "nocorner" in MODE:                                # corner relief for every body (6b95197) off
@@ -105,6 +152,9 @@ if "nobars" in MODE:                                  # loose pieces joined (e63
     import param_body
     param_body.BRIDGE_MIN_MM3 = 1e18
 out = Path("../stress_p1")
+if "meshwall" in MODE:                                 # keep each car's files; measure them after sc.main
+    import os
+    os.environ["P4_KEEP_DIR"] = str(Path("../kept").resolve())
 sys.argv = ["stress_cars.py", "--seed", str(seed), "--n", str(n), "--out", str(out), "--carve"]
 sc.main()
 for p in sorted(out.glob(f"car_{seed}_*.json"), key=lambda p: int(p.stem.split("_")[-1])):
@@ -114,3 +164,6 @@ for p in sorted(out.glob(f"car_{seed}_*.json"), key=lambda p: int(p.stem.split("
                                "cuts": r.get("layout", {}).get("cuts"), "hard": r.get("layout", {}).get("hard"),
                                "min_wall_mm": r.get("min_wall_mm"), "thin_at_start": r.get("layout", {}).get("thin_at_start"),
                                "seconds": r.get("seconds"), "peak_gb": r.get("peak_gb")}), flush=True)
+if "meshwall" in MODE:
+    for p in sorted(Path("../kept").rglob("machined_body.stl")):
+        print("LAB meshwall " + json.dumps({"seed": seed, "dir": p.parent.name, **_mesh_wall(p)}), flush=True)
