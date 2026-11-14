@@ -274,6 +274,14 @@ def frame(bs: BeamSupport, plate_h_mm: float, span_mm: float, reach_mm: float, a
     return {"stress_mpa": float(stress), "sag_mm": float(drop + slope * reach_mm)}
 
 
+def require_one_piece(part):
+    """The support is ONE solid; a loose piece is a builder bug and stops the build."""
+    pieces = part.split(only_watertight=False)
+    if len(pieces) != 1:
+        raise ValueError(f"beam_support.build: the support came out in {len(pieces)} pieces "
+                         f"(bounds mm {[np.round(p.bounds * 1e3, 2).tolist() for p in pieces]})")
+
+
 def pod_channel(bs: BeamSupport, body, x_axle_mm: float, z_axle_mm: float, R_mm: float) -> dict:
     """The channel the pod takes at one axle of this body (half body, metres):
     its ends along the car and its roof. The length is cut back until the
@@ -468,10 +476,7 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
     # Guard: the support is ONE solid. A loose piece is a builder bug, never a design
     # choice, so it stops the build here instead of reaching the files (reach and claw
     # clearance stay gates: a too-wide setting is an illegal car, not a crash).
-    pieces = part.split(only_watertight=False)
-    if len(pieces) != 1:
-        raise ValueError(f"beam_support.build: the support came out in {len(pieces)} pieces "
-                         f"(bounds mm {[np.round(p.bounds * 1e3, 2).tolist() for p in pieces]})")
+    require_one_piece(part)
     v = part.vertices * 1e3                                  # metres, like gates()
     band = v[(v[:, 1] > y_inner_mm - CLAW_LIP_MM) & (v[:, 1] < y_inner_mm)]
     st["claw_band_r_mm"] = float(np.hypot(band[:, 0] - x_axle_mm, band[:, 2] - z_axle_mm).max()) if len(band) else 0.0

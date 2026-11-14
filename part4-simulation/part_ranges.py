@@ -189,8 +189,7 @@ def bounds(car: Car, current: dict, prev: dict | None = None, tol: float = 0.02)
                     lo_hi.append(end)                       # no rule limit inside the window
                     continue
                 lo_hi.append(_edge(part, base, s, car, v0, end, tol)[0])
-            cap = builder_cap(part, s, base, car) if s == "beam_w_mm" else None
-            hi = min(lo_hi[1], cap) if cap is not None else lo_hi[1]
+            hi = lo_hi[1]
             out[(part, s)] = (min(lo_hi[0], v0), max(hi, v0))
     return out
 

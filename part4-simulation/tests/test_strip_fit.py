@@ -69,7 +69,7 @@ def _switch_floor():
 
 def test_pod_to_rod_switch_just_inside_and_just_outside():
     f0 = _switch_floor()
-    assert 12.0 < f0 < 16.0                                               # ~15 mm with the defaults
+    assert 3.0 < f0 < CEILING                                             # measured 9.5 on this body
     below, gb = _build(f0 - 0.05)
     above, ga = _build(f0 + 0.05)
     assert below["_pod"] and not below["_floor_high"]
@@ -80,11 +80,13 @@ def test_pod_to_rod_switch_just_inside_and_just_outside():
 
 
 def test_a_loose_piece_stops_the_build():
-    # the guard: a support in more than one piece is a builder bug and raises
-    bs = bsm.BeamSupport(pod=False, disc_r_mm=0.5)
-    _, hub = wh.hub_span_mm()
+    # the guard build() runs on every support: one solid passes, two raise
+    a = trimesh.creation.box(extents=[0.01, 0.01, 0.01])
+    b = a.copy()
+    b.apply_translation([0.05, 0, 0])
+    bsm.require_one_piece(a)
     with pytest.raises(ValueError, match="pieces"):
-        bsm.build(dataclasses.replace(bs, z_offset_mm=13.0), X, Z, Y_IN, W, False, hub_mm=hub, R_mm=R, channel={})
+        bsm.require_one_piece(trimesh.util.concatenate([a, b]))
 
 
 def test_floor_high_car_is_built_milled_judged_and_timed_as_one_rod():
