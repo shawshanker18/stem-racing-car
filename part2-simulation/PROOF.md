@@ -243,6 +243,19 @@ One medium car solved twice in one job on ONE core, before and with the change f
 
 Car C0 on the fine mesh (shawshanker18/stem-racing-compute 43441210212): max skewness 4.81, one face over the limit, face 13235499. The `car` patch (the machined body) holds faces 13234965–13287897, so the face is on the body surface, about the 534th body face; not on a wing, nose, support or wheel. One face out of 13.3 million, on a wall where the wall function sets the flow, so it is not expected to move the drag. Its exact position needs the face set written as points; that step did not find the file and is to be fixed if the face starts to matter.
 
+## Fine mesh: fallbacks if the noise is over 0.3 ms (ranked; marks unchanged)
+
+The fine set runs as p2_fine kind=car from one frozen fine reference, 1000 steps, 2 cores, one car per job, chained. If it fails:
+
+| rank | fallback | evidence (medium mesh) | cost | ready to dispatch |
+| --- | --- | --- | --- | --- |
+| 1 | time every car from BOTH frozen states and average (method A) | one state: 0.57–0.86 ms on skin ladders; both states: 0.091 / 0.087 ms on the smooth ladder | 2 solves per car; needs a second fine reference in the other state (fr4 and fr5 are built on two machines for this) | p2_fine kind=car ref_tag=p2-ref-fine-B (same inputs) |
+| 2 | longer averaging: 3000 steps | averaging part fell from 0.62 to 0.34 ms (1/sqrt 3) at 3000 steps; window length (last 20–80 %) made no difference | 3 x solve time (3–4 links per car) | p2_fine iters=3000 |
+| 3 | finer wake region behind the base | the car-to-car spread came from the body and rear-wheel wake switching | more cells; the medium-plus recipe was stopped by the user, so needs a new decision | needs approval |
+| 4 | time-accurate tail after the steady solve | 0.12 s pimpleFoam kept each car on its own state; 0.15 s did not fit one job | many hours per car | p2_transient (chained version not built) |
+
+Ranks 1 and 2 need no new code: they are inputs of the same workflow, already exercised (p2_fine kind=car is the path the noise set itself uses).
+
 ## Still to prove
 
 - Ahmed body benchmarks: 35° reported (RANS limit); 25° and the cube are the pass cases (decision 2026-11-09).
