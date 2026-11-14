@@ -361,14 +361,14 @@ def _zone_masks(
     return zones
 
 
-# Support-design limit, TEMPORARY (Part 4 via BIG DON, 2026-11-14): Part 4's pod support puts its
-# strip 2.5 mm above the body's floor at each axle and under a plate whose underside is at
-# 18.65 mm less its 0.7-0.8 mm thickness, so the floor there must be <= 14.9 mm; the pod roof
-# needs the body's top >= 23 mm. Kept as body on the centreline (|y| <= 1.5 mm), x_axle +- 7 mm,
-# z 14.0-23.0 mm. Referee gate fit_<front|rear>_strip_under_plate_on_disc (015d2e0); cases
-# 44130/0 (floor 24.5) and 50002/0 (26.6). Relax to the rule ceiling (floor <= ~24.6 mm, T7.12.1)
-# when Part 4's floor-high support is on main.
-AXLE_SUPPORT_HALF_X_MM, AXLE_SUPPORT_HALF_Y_MM, AXLE_SUPPORT_Z_MM = 7.0, 1.5, (14.0, 23.0)
+# Support-design limit (3.0 mm embed; the rule-only ceiling is z_axle + R ~ 27.9 mm). Part 4,
+# 2026-11-14: where the pod frame cannot fit, Part 4's support is a 6.27 mm rod in a slot in
+# the body's floor, its top 3.0 mm into the foam and inside R - 0.3, so the floor at each axle
+# must be <= z_axle + (R - 0.3) - 3.0 ~ 24.65 mm. Kept as body on the centreline
+# (|y| <= 1.5 mm, x_axle +- 7 mm, z 23.5-24.5 mm): floor <= 23.5 mm, 1.1 mm under the ceiling.
+# Referee gate P4.fit_<front|rear>_floor_rod_embed (e9afa43). Was z 14-23 for the pod frame
+# (43b6d7a) until the rod support landed.
+AXLE_SUPPORT_HALF_X_MM, AXLE_SUPPORT_HALF_Y_MM, AXLE_SUPPORT_Z_MM = 7.0, 1.5, (23.5, 24.5)
 
 
 def _axle_support_mask(region, x_front_mm: float, W_mm: float):
