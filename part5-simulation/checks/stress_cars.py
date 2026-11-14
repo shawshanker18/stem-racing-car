@@ -128,6 +128,7 @@ def carve_field(c: dict, path: Path) -> None:
     # "ok:<sub-steps>" (+ "w" when the 3.0 mm wall ended the cut early), or the refusal reason
     c.setdefault("layout", {})["cuts"] = [f"ok:{r.get('substeps')}" + ("w" if r.get("min_wall_stop") else "")
                                          if r["status"] == "ok" else r["reason"][:40] for r in reps]
+    c["layout"]["thin_at_start"] = reps[0].get("thin_wall_cells_at_start") if reps else None
 
 
 def build_one(c: dict) -> dict:
@@ -151,6 +152,7 @@ def build_one(c: dict) -> dict:
         row["failed"] = [k for k in S["legality"]["summary"]["failed"] if k not in IGNORED]
         row["notes"] = {k: S["legality"]["checks"][k]["note"][:2000] for k in row["failed"]}
         row["mass_g"] = S["mass"].get("manufactured_mass_g")
+        row["min_wall_mm"] = S.get("body", {}).get("build", {}).get("min_machined_wall_mm")   # 3.0 mm team limit
         row["status"] = "legal" if not row["failed"] else "illegal"
     except (Exception, SystemExit) as exc:  # noqa: BLE001 -- a car that will not build is the result
         row["status"] = "illegal" if str(exc).startswith("illegal car") else "crash"

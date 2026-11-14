@@ -112,4 +112,5 @@ for p in sorted(out.glob(f"car_{seed}_*.json"), key=lambda p: int(p.stem.split("
     print("LAB " + json.dumps({"car": p.stem, "status": r["status"], "failed": r.get("failed"),
                                "notes": r.get("notes"), "error": r.get("error"), "where": r.get("where"),
                                "cuts": r.get("layout", {}).get("cuts"), "hard": r.get("layout", {}).get("hard"),
+                               "min_wall_mm": r.get("min_wall_mm"), "thin_at_start": r.get("layout", {}).get("thin_at_start"),
                                "seconds": r.get("seconds"), "peak_gb": r.get("peak_gb")}), flush=True)
