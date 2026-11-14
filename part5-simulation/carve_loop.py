@@ -136,7 +136,26 @@ def plan(state: dict, direction, step) -> None:
             c["cands"] = {str(f): step(c["x"], d / n, f * c["scale"] * length) for f in SIZES}
 
 
-def advance(state: dict, results: dict, prior_sigma: float) -> None:
+
+def _t(r, current: bool = False) -> float:
+    """A timing. On the farm a result is a dict: the race time, the referee's verdict and the hashes
+    of the field that was asked for, judged and timed. A step whose timed body is not the legal body
+    asked for is refused (never kept); the current car must always be valid."""
+    if not isinstance(r, dict):
+        return r                                   # the bench's bare numbers
+    ok = r.get("legal") is True and r.get("T_s") is not None and r.get("expect_field_sha") \
+        and r.get("expect_field_sha") == r.get("field_sha") == r.get("judged_field_sha")
+    if ok:
+        return r["T_s"]
+    if current:
+        raise ValueError(f"the current car's timing is not its legal, hashed body: {r}")
+    return float("inf")
+
+def advance(state: dict, results: dict, prior_sigma: float, shape_sigma: float) -> None:
+    """shape_sigma: Part 2's measured car-to-car noise on the loop's mesh (s). Re-timing one shape
+    repeats its own error, so it never averages away: the keep bar always carries 2 shape_sigma^2
+    (current car and candidate are two shapes), however many copies are timed."""
+    assert shape_sigma > 0, "shape_sigma must be Part 2's measured car-to-car noise on the loop's mesh"
     """Use whatever results exist; move each chain on once its round's cases are all in."""
     need = needed(state)
     for c in state["chains"]:
@@ -147,11 +166,11 @@ def advance(state: dict, results: dict, prior_sigma: float) -> None:
             continue
         if c["phase"] == "search":
             for r in range(len(c["times"]), 2):
-                c["times"].append(results[case(c, f"cur{r}")])
+                c["times"].append(_t(results[case(c, f"cur{r}")], True))
             if len(c["times"]) == 2 and not c["pairs"]:
                 c["pairs"].append(tuple(c["times"][:2]))
             T0 = sum(c["times"]) / len(c["times"])
-            dT = {s: results[case(c, f"s{s}")] - T0 for s in c["cands"]}
+            dT = {s: _t(results[case(c, f"s{s}")]) - T0 for s in c["cands"]}
             c["timed"] += len(dT)
             c["slower"] += sum(v > 0 for v in dT.values())
             c["dT"] = dT
@@ -159,23 +178,25 @@ def advance(state: dict, results: dict, prior_sigma: float) -> None:
             c["phase"] = "confirm"
             continue
         n = c.get("nconf", CONFIRM)
-        conf = [results[case(c, f"conf{r}")] for r in range(n)]
-        cur = c["times"] + [results[case(c, f"curx{r}")] for r in range(n - CONFIRM)]
+        conf = [_t(results[case(c, f"conf{r}")]) for r in range(n)]
+        cur = c["times"] + [_t(results[case(c, f"curx{r}")], True) for r in range(n - CONFIRM)]
         T0 = sum(cur) / len(cur)
         sig = pooled_sigma(c, prior_sigma)
         # Bonferroni over the k candidates AND the LOOKS confirm looks (2, 4, 8 runs)
         z = z_bonferroni(len(c["cands"]) * LOOKS)
         gain = T0 - sum(conf) / n
-        keep = gain > z * sig * (1 / len(cur) + 1 / n) ** 0.5
-        if not keep and gain > 0 and n < CONFIRM * 2 ** (LOOKS - 1):
+        bar = z * (sig ** 2 * (1 / len(cur) + 1 / n) + 2 * shape_sigma ** 2) ** 0.5
+        keep = gain > bar
+        copies_help = sig ** 2 * (1 / len(cur) + 1 / n) > 0.1 * 2 * shape_sigma ** 2   # more copies only cut repeat noise
+        if not keep and gain > 0 and copies_help and n < CONFIRM * 2 ** (LOOKS - 1):
             c["nconf"] = 2 * n                    # promising but not yet clear: time both more
             continue
-        c["pairs"] += [(conf[i], conf[i + 1]) for i in range(0, n - 1, 2)]
+        c["pairs"] += [(conf[i], conf[i + 1]) for i in range(0, n - 1, 2) if max(conf[i], conf[i + 1]) < float("inf")]
         c["pairs"] += [(cur[i], cur[i + 1]) for i in range(len(c["times"]), len(cur) - 1, 2)]
         c["nconf"] = CONFIRM
         c["history"].append({"round": c["round"], "scale": c["scale"], "best": float(c["best"]),
                              "dT_search": c["dT"][c["best"]], "gain_confirm": gain, "sigma": sig,
-                             "z": z, "confirm_runs": n, "kept": keep})
+                             "z": z, "bar": bar, "confirm_runs": n, "kept": keep})
         if keep:
             c["x_prev"], c["g_prev"] = c["x"], c["g"]
             c["x"], c["times"] = c["cands"][c["best"]], list(conf)
@@ -216,7 +237,7 @@ def to_start(state: dict, results: dict, running: set, free: int) -> list:
     return out
 
 
-def run_local(state: dict, direction, step, measure, prior_sigma: float) -> dict:
+def run_local(state: dict, direction, step, measure, prior_sigma: float, shape_sigma: float) -> dict:
     """The whole loop with an immediate stopwatch (the fake bench); the farm does the same with
     needed/advance across GitHub jobs."""
     results = {}
@@ -224,5 +245,5 @@ def run_local(state: dict, direction, step, measure, prior_sigma: float) -> dict
         plan(state, direction, step)
         for k, (x, _) in needed(state).items():
             results[k] = measure(x, k)
-        advance(state, results, prior_sigma)
+        advance(state, results, prior_sigma, shape_sigma)
     return state

@@ -12,7 +12,7 @@ For each printed part P and the aero body B (right halves, metres):
     plug   = prism(fp ⊕ r, from the open face to the far end of O)
     pocket = plug ∩ B                       what the mill removes
 
-fp ⊕ r (a 3.125 mm buffer) is where the ball's CENTRE can go with its edge still
+fp ⊕ r (a 3.175 mm buffer) is where the ball's CENTRE can go with its edge still
 covering fp, so the milled pocket contains the plug; a straight prism to the
 open face is what a vertical cutter can reach. The printed part is P ∪ pocket,
 so the outside shape (and the CFD) is unchanged while plastic replaces foam
@@ -30,7 +30,7 @@ import math
 
 import numpy as np
 
-TOOL_R_MM = 3.125
+TOOL_R_MM = 3.175              # the team's smallest machined radius (team, 2026-11-14)
 FOAM_G_CM3 = 0.163
 NOSE_CUT_BACK_MM = 0.05       # the printed nose's body part ends this far ahead of Ref A (nose_part)
 # Foam cut this much larger than the printed plug, per side. UNMEASURED: 0.1-0.2 mm
@@ -286,7 +286,9 @@ def pod_joint(part, body_half, channels: dict, keep_out=None) -> Joint | None:
         if keep_out is not None:
             one = _bool("difference", [one, keep_out])
         lump = body_full ^ man(one)
-        cavity = lump.minkowski_difference(m3.Manifold.sphere(ch["wall_mm"] * 1e-3, 12))
+        # a polyhedral ball lies inside the true one: scaled so its faces reach the wall, or the
+        # wall comes out thinner than asked (0.55-0.69 measured against 0.7, car 44719/0)
+        cavity = lump.minkowski_difference(m3.Manifold.sphere(ch["wall_mm"] * 1e-3 / math.cos(math.pi / 24) ** 2, 24))
         if cavity.is_empty():
             shells.append(lump)
             continue
@@ -341,8 +343,8 @@ def machined_body(body_half, joints, x_ref_a_mm: float | None = None):
 # down to z 4.5 mm, i.e. the team does this).
 OPEN_SIDE = {"supports": "bottom", "fwing": "bottom", "tethers": "bottom",
              "rwing": "top", "nose": "bottom"}
-DENSITY_G_CM3 = {"supports": 1.01, "fwing": 1.24, "rwing": 1.24, "tethers": 1.24,
-                 "nose": 1.01}
+DENSITY_G_CM3 = {"supports": 1.04, "fwing": 1.04, "rwing": 1.04, "tethers": 1.04,   # ABS (team, 2026-11-14)
+                 "nose": 1.04}
 
 
 def density_source(rho_g_cm3: float) -> tuple:
@@ -351,6 +353,8 @@ def density_source(rho_g_cm3: float) -> tuple:
     value until the team gives its real print weights."""
     if abs(rho_g_cm3 - FOAM_G_CM3) < 1e-9:
         return "foam block, team spec (geometry_contract.DENSITY_BODY_KGM3 = 163)", False
+    if abs(rho_g_cm3 - 1.04) < 1e-9:
+        return "ABS 1.04 g/cm3, generic material datasheet (the team prints ABS, 2026-11-14), solid print", False
     if abs(rho_g_cm3 - 1.01) < 1e-9:
         return "SLS PA12 datasheet 1.01 g/cm3 (team material spec 2026-09-27)", False
     if abs(rho_g_cm3 - 1.24) < 1e-9:
@@ -412,7 +416,7 @@ def make_all(body_half, assembly: dict, x_ref_a_mm: float, rear_face_mm: float,
             report["parts"][name] = {"joint": "surface bond (no pocket possible)"}
         else:
             joints.append(j)
-            dm = j.mass_delta_kg(DENSITY_G_CM3.get(name, 1.24))
+            dm = j.mass_delta_kg(DENSITY_G_CM3.get(name, 1.04))
             if name == "nose":
                 # The nose ahead of Ref A is already in the body's mass (Part 1's
                 # nose density): only its tenon's pocket is new.
@@ -561,7 +565,7 @@ def make_all(body_half, assembly: dict, x_ref_a_mm: float, rear_face_mm: float,
         solid = _fill_voids(_drop_dust(solid, 1e-9))
         made["printed_front_assembly"] = (solid, DENSITY_G_CM3["nose"], 1)
     for name, m in P.items():
-        made[f"printed_{name}"] = (m, DENSITY_G_CM3.get(name, 1.24),
+        made[f"printed_{name}"] = (m, DENSITY_G_CM3.get(name, 1.04),
                                    2 if name == "tethers" else 1)
     report["manufactured"] = {k: {"cm3": abs(m.volume) * 1e6, "g": abs(m.volume) * 1e6 * rho, "g_cm3": rho,
                                   "density_source": density_source(rho)[0],
@@ -589,7 +593,7 @@ def make_all(body_half, assembly: dict, x_ref_a_mm: float, rear_face_mm: float,
                 # Listed for the team, not in report["manufactured"]: they are in their own
                 # frame, not placed on the car, and their mass is counted with the wheels.
                 wheels[f"printed_wheel_{tag}_x2"] = {
-                    "cm3": abs(mesh.volume) / 1e3, "g": abs(mesh.volume) / 1e3 * wh.PA12_G_CM3,
+                    "cm3": abs(mesh.volume) / 1e3, "g": abs(mesh.volume) / 1e3 * wh.ABS_G_CM3,
                     "file": str(out / f"printed_wheel_{tag}_x2.stl"), "closed": bool(mesh.is_volume),
                     "pieces": len(mesh.split(only_watertight=False)), "copies": 2}
         else:
@@ -599,8 +603,8 @@ def make_all(body_half, assembly: dict, x_ref_a_mm: float, rear_face_mm: float,
     return report
 
 
-MATERIAL_BY_DENSITY = {FOAM_G_CM3: ("Model Block foam", "CNC mill, 6.25 mm ball end, 4 sides"),
-                       1.01: ("PA12", "SLS print"), 1.24: ("PLA", "FDM print")}
+MATERIAL_BY_DENSITY = {FOAM_G_CM3: ("Model Block foam", "CNC mill, 6.35 mm ball end, 4 sides"),
+                       1.01: ("PA12", "SLS print"), 1.24: ("PLA", "FDM print"), 1.04: ("ABS", "FDM print")}
 
 
 def write_parts_list(made: dict, path) -> None:
@@ -645,10 +649,14 @@ def nose_shell(cone_half, wall_mm: float, x_ref_a_mm: float):
         # With no ballast that is mass with no aero cost (the alternative is
         # a fatter body), and it needs no powder drain.
         return _bool("intersection", [outer, ahead]), None
-    inner = outer.copy()
-    inner.apply_translation([-x_root, 0.0, -zc])
-    inner.apply_scale([(L - w) / L, (b0 - w) / b0, (h0 - w) / h0])
-    inner.apply_translation([x_root, 0.0, zc])
+    # A true offset of the outside by the wall (a scaled copy left the wall at 0.55 mm
+    # where the cone narrows, against 0.8 asked: car 44719/0). The polyhedral ball is
+    # scaled so its faces reach the wall.
+    import manifold3d as m3
+    o = m3.Manifold(m3.Mesh(vert_properties=np.asarray(outer.vertices, np.float32),
+                            tri_verts=np.asarray(outer.faces, np.uint32)))
+    c = o.minkowski_difference(m3.Manifold.sphere(w / math.cos(math.pi / 24) ** 2, 24)).to_mesh()
+    inner = trimesh.Trimesh(np.asarray(c.vert_properties)[:, :3], np.asarray(c.tri_verts), process=False)
     cavity = _bool("intersection", [inner, trimesh.creation.box(
         bounds=[[-1.0, -0.2, -0.01], [xa - w, 0.2, 0.2]])])
     drain = trimesh.creation.cylinder(radius=1.5e-3, height=0.02, sections=24)

@@ -159,9 +159,13 @@ def field(item: str) -> np.ndarray:
 
 def run_car(item: str, ref: str | None, out: Path) -> Path:
     o = out / item
+    if os.environ.get("P5_LOOP") == "1" and item != "base" and not ref:      # one frozen start state for every loop timing
+        raise SystemExit(f"loop timing {item} without the frozen start state (the base car's mesh and flow)")
     shutil.rmtree(o, ignore_errors=True)
     o.mkdir(parents=True)
     np.save(o / "field.npy", field(item))
+    import hashlib
+    expect = hashlib.sha256((o / "field.npy").read_bytes()).hexdigest()   # the carve.carve body asked for
     opt = {"layer_overrides": {"nSurfaceLayers": 0}}
     if ref:
         opt.update(morph_from=ref, warm_from=ref)
@@ -170,6 +174,7 @@ def run_car(item: str, ref: str | None, out: Path) -> Path:
     cmd = [sys.executable, "-W", "ignore", "run_car.py", "--out", str(o), "--skin-mm", SKIN, "--support", "beam",
            "--phi-npy", str(o / "field.npy"), "--cfd", "--cfd-if-legal", "--cfd-iters", ITERS, "--res", mesh(), "--np", "2",
            "--keep-runs", "--cfd-json", json.dumps(opt)]
+    assert "--phi-npy" in cmd and "--body-json" not in cmd and "--cfd-if-legal" in cmd, cmd   # carve body only, legality-gated
     p = subprocess.run(cmd, capture_output=True, text=True)
     if p.returncode != 0:
         marker = os.environ.get("P2_CHECKPOINT_FILE")
@@ -182,7 +187,8 @@ def run_car(item: str, ref: str | None, out: Path) -> Path:
     S = json.loads((o / "summary.json").read_text())
     failed = sorted(k for k, v in S["legality"]["checks"].items() if not v["pass"])
     if failed:                                            # the referee's check: an illegal car is never timed
-        rec = {"item": item, "legal": False, "failed": failed, "T_s": None}
+        rec = {"item": item, "legal": False, "failed": failed, "T_s": None, "expect_field_sha": expect,
+               "field_sha": S["hashes"].get("field_npy"), "judged_field_sha": S["hashes"].get("field_npy")}
         (o / "result.json").write_text(json.dumps(rec))
         shutil.rmtree(runs, ignore_errors=True)
         print(f"LAB {item}: ILLEGAL ({', '.join(failed)}), not timed", flush=True)
@@ -195,6 +201,9 @@ def run_car(item: str, ref: str | None, out: Path) -> Path:
         shutil.copytree(run, dst, ignore=shutil.ignore_patterns("processor*", "logs", "postProcessing"))
     c = S["cfd_initial"]
     rec = {"item": item, "legal": True, "T_s": c["T_at_target_s"], "D_N": c["D20_N"], "L_N": c["L_N"],
+           "expect_field_sha": expect, "field_sha": S["hashes"].get("field_npy"),
+           "judged_field_sha": S["hashes"].get("field_npy"), "judged_stl_sha": S["hashes"]["judged_body_half_stl"],
+           "timed_cfd_stl_sha": S["hashes"].get("timed_cfd_stl"),
            "converged": c["converged"], "morph_fallback": (run / "MORPH_FALLBACK").exists(),
            "parts_D_N": {k: v["D_N"] for k, v in (c.get("parts") or {}).items()}}
     (o / "result.json").write_text(json.dumps(rec, default=float))
@@ -282,13 +291,31 @@ def judge(d: Path):
 if __name__ == "__main__":
     sys.path[:0] = [".", str(Path(__file__).resolve().parent)]
     cmd = sys.argv[1]
-    if cmd in ("run", "coverage"):
+    if cmd in ("run", "coverage", "decimation"):
         import pattern, solver                          # noqa: E402,F401  (these put the other parts on the path)
     if cmd == "plan":
         its = items()
         print(json.dumps([" ".join(its[i:i + CHUNK]) for i in range(0, len(its), CHUNK)]))
     elif cmd == "run":
         run(None if sys.argv[2] == "-" else str(Path(sys.argv[2]).resolve()), Path(sys.argv[3]), sys.argv[4:])
+    elif cmd == "decimation":                            # CFD STL vs judged body on carve.carve cars
+        rows = []
+        for item in sys.argv[2:]:
+            o = Path("decim") / item
+            o.mkdir(parents=True, exist_ok=True)
+            np.save(o / "field.npy", field(item))
+            p = subprocess.run([sys.executable, "-W", "ignore", "run_car.py", "--out", str(o), "--skin-mm", SKIN,
+                                "--support", "beam", "--phi-npy", str(o / "field.npy"), "--gate-only"],
+                               capture_output=True, text=True)
+            if p.returncode:
+                print(p.stdout[-2000:], p.stderr[-2000:])
+                raise RuntimeError(f"run_car --gate-only failed on {item}")
+            S = json.loads((o / "summary.json").read_text())
+            rows.append({"item": item, **S["decimation"], "cfd_stl_sha": S["hashes"]["timed_cfd_stl"]})
+            print(f"LAB decimation {item}: {json.dumps(rows[-1])}", flush=True)
+        Path("decimation.json").write_text(json.dumps(rows, indent=1))
+        print(f"LAB decimation worst Hausdorff {max(r['hausdorff_mm'] for r in rows):.4f} mm, "
+              f"worst mean {max(r['mean_mm'] for r in rows):.4f} mm over {len(rows)} cars", flush=True)
     elif cmd == "coverage":                              # do the modes tile the whole half body?
         _, V, N = surface(block())
         f, gap, need = coverage(V, N)

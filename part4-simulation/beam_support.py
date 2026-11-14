@@ -65,21 +65,21 @@ import numpy as np
 
 import component_contract as cc
 
-PA12_G_CM3 = 1.01
-TOOL_R_MM = 3.125
+ABS_G_CM3 = 1.04             # the team prints ABS (team, 2026-11-14); generic ABS datasheet 1.04 g/cm3
+TOOL_R_MM = 3.175              # the team's smallest machined radius (team, 2026-11-14)
 STUB_D_MM = 3.0               # the journal: the 3x6x2.5 bearing's bore
 BEARING_W_MM = 2.5
 RIM_INNER_R_MM = 13.72        # the team wheel's rim, inside (measured on the STL)
 FLOOR_EMBED_MM = 3.0          # a floor-high rod's top this far into the foam: a glue pocket
-#                               the 3.125 mm ball can mill (support-design choice, not a rule)
+#                               the 3.175 mm ball can mill (support-design choice, not a rule)
 CLAW_LIP_MM = 1.5            # T7.13 hang-test claw lip (regulation figure, p.34; legality.py)
 
 # Loads and limits (see the module docstring)
 LOAD_RADIAL_N = 3.0
 LOAD_AXIAL_N = 1.2
 PRINT_MIN_MM = cc.MIN_WALL_MM   # thinnest wall the printer makes reliably (component_contract)
-PA12_STRENGTH_MPA = 44.0
-PA12_E_MPA = 1650.0
+ABS_STRENGTH_MPA = 40.0      # generic ABS datasheet tensile strength; a print can be weaker (team to confirm)
+ABS_E_MPA = 2000.0           # generic ABS datasheet modulus (2.0-2.3 GPa); the lower end
 SAFETY = 2.0
 SAG_MAX_MM = 0.15
 
@@ -120,7 +120,7 @@ class BeamSupport:
     hubcap: bool = True
     hubcap_r_mm: float = 12.0      # as the disc: 1.5 mm off the track (T3.7)
     hubcap_t_mm: float = PRINT_MIN_MM
-    material_g_cm3: float = PA12_G_CM3
+    material_g_cm3: float = ABS_G_CM3
 
 
 def section(bs: BeamSupport, n: int = 64) -> np.ndarray:
@@ -135,6 +135,23 @@ def section(bs: BeamSupport, n: int = 64) -> np.ndarray:
     c, s = np.cos(t), np.sin(t)
     a, b = bs.beam_w_mm / 2, bs.beam_h_mm / 2
     return np.c_[a * np.sign(c) * np.abs(c) ** (2 / bs.p), b * np.sign(s) * np.abs(s) ** (2 / bs.p)]
+
+
+def printable_section(bs: BeamSupport, n: int = 64) -> np.ndarray:
+    """The section with no edge thinner than the print minimum: a superellipse tapers to
+    nothing at its sides (the referee measured 0.05-0.15 mm at the strip's and plate's
+    edges, car 44719/0), so it is cut flat where it is still PRINT_MIN_MM thick. A section
+    under that thickness everywhere becomes a rectangle of the print minimum. For the pod's
+    members, which nothing mills round (a bare beam's slot needs section() unchanged)."""
+    from shapely.geometry import Polygon, box
+    a, b, t = bs.beam_w_mm / 2, bs.beam_h_mm / 2, PRINT_MIN_MM
+    if bs.round_r_mm > 0:
+        return section(bs, n)
+    if 2 * b <= t:
+        return np.asarray(box(-a, -t / 2, a, t / 2).exterior.coords)[:-1]
+    xc = a * (1 - (t / (2 * b)) ** bs.p) ** (1 / bs.p)      # where the thickness is t
+    cut = Polygon(section(bs, 4 * n)).intersection(box(-xc, -b - 1, xc, b + 1))
+    return np.asarray(cut.exterior.coords)[:-1]
 
 
 def min_curvature_radius_mm(bs: BeamSupport) -> float:
@@ -204,10 +221,10 @@ def structure(bs: BeamSupport, outline: list, y_bearing_mm: float, y_fixed_mm: f
     d = 2 * np.array([r_of(y) for y in ys])
     sigma = 32 * M / (math.pi * d ** 3)
     # sag: integrate the curvature M / EI twice from the fixed end
-    k = M / (PA12_E_MPA * math.pi * d ** 4 / 64)
+    k = M / (ABS_E_MPA * math.pi * d ** 4 / 64)
     slope = np.concatenate([[0.0], np.cumsum(0.5 * (k[1:] + k[:-1]) * np.diff(ys))])
     sag = float(np.sum(0.5 * (slope[1:] + slope[:-1]) * np.diff(ys)))
-    return {"stress_mpa": float(sigma.max()), "allow_mpa": PA12_STRENGTH_MPA / SAFETY,
+    return {"stress_mpa": float(sigma.max()), "allow_mpa": ABS_STRENGTH_MPA / SAFETY,
             "stress_at_y_mm": float(ys[int(sigma.argmax())]), "sag_mm": sag,
             "journal_stress_mpa": float(32 * LOAD_AXIAL_N * R_mm / (math.pi * STUB_D_MM ** 3))}
 
@@ -218,14 +235,14 @@ def sized_disc_t_mm(bs: BeamSupport, y_disc_mm: float, y_bearing_mm: float, R_mm
     strip of disc as wide as the member it feeds, bending out of its plane."""
     M = LOAD_RADIAL_N * (y_bearing_mm - y_disc_mm) + LOAD_AXIAL_N * R_mm
     w = min(bs.beam_w_mm, bs.strip_w_mm) if bs.strip else bs.beam_w_mm
-    return max(bs.disc_t_mm, PRINT_MIN_MM, math.sqrt(6 * (M / 2) / (w * PA12_STRENGTH_MPA / SAFETY)))
+    return max(bs.disc_t_mm, PRINT_MIN_MM, math.sqrt(6 * (M / 2) / (w * ABS_STRENGTH_MPA / SAFETY)))
 
 
 def sized_root_d_mm(bs: BeamSupport, y_disc_mm: float, y_bearing_mm: float, R_mm: float) -> float:
     """The boss diameter at the disc: the larger of the asked boss_d and what
     the root's bending moment needs at the allowed stress."""
     M = LOAD_RADIAL_N * (y_bearing_mm - y_disc_mm) + LOAD_AXIAL_N * R_mm
-    need = (32 * M / (math.pi * PA12_STRENGTH_MPA / SAFETY)) ** (1 / 3)
+    need = (32 * M / (math.pi * ABS_STRENGTH_MPA / SAFETY)) ** (1 / 3)
     return max(bs.boss_d_mm, need, bs.shoulder_d_mm)
 
 
@@ -258,7 +275,7 @@ def frame(bs: BeamSupport, plate_h_mm: float, span_mm: float, reach_mm: float, a
     I1, A1 = k * bs.beam_w_mm * plate_h_mm ** 3, a * bs.beam_w_mm * plate_h_mm
     M_tip = LOAD_RADIAL_N * reach_mm + LOAD_AXIAL_N * R_mm        # at the disc
     M_root = M_tip + LOAD_RADIAL_N * span_mm                      # at the body's side
-    E = PA12_E_MPA
+    E = ABS_E_MPA
     if bs.strip and arm_mm > 2.0:
         I2, A2 = k * bs.strip_w_mm * bs.strip_h_mm ** 3, a * bs.strip_w_mm * bs.strip_h_mm
         N = M_root / arm_mm
@@ -320,7 +337,7 @@ def claw_neck(bs: BeamSupport, dx_mm: float, dz_mm: float, rk_mm: float):
     from shapely.geometry import Point, Polygon, box
     a = bs.beam_w_mm / 2
     web = box(dx_mm - a, min(0.0, dz_mm), dx_mm + a, max(0.0, dz_mm))
-    sec = Polygon(section(bs)).buffer(0)
+    sec = Polygon(printable_section(bs)).buffer(0)
     sec = Polygon(np.asarray(sec.exterior.coords) + [dx_mm, dz_mm])
     neck = sec.union(web).intersection(Point(0, 0).buffer(rk_mm, quad_segs=64))
     return neck, np.asarray(web.exterior.coords)[:-1]
@@ -346,7 +363,7 @@ def neck_section_modulus_mm3(poly) -> float:
 
 def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float,
           wheel_width_mm: float, disc: bool, hub_mm: tuple = (5.25, 8.25),
-          R_mm: float = 14.12, channel: dict | None = None) -> dict:
+          R_mm: float = 14.12, channel: dict | None = None, mode: str | None = None) -> dict:
     """Right half of one axle's support, metres: plate, strip, disc, boss and
     stub as one piece, and the hubcap as its own. `hub_mm` is where the
     wheel's hub (its bearing seat) lies, measured from the wheel's inner
@@ -370,6 +387,19 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
         w = min(bs.beam_w_mm, bs.strip_w_mm) if bs.strip else bs.beam_w_mm
         st["disc_stress_mpa"] = 6 * (LOAD_RADIAL_N * (y_bear - y_disc) + LOAD_AXIAL_N * R_mm) / 2             / (w * disc_t ** 2)
     pod = bs.pod and bool(channel) and channel["length_mm"] > 2 * TOOL_R_MM + 1.0
+    # mode: the design held fixed (support_mode of an earlier build of this car), so that
+    # sizing the body, which moves its skin a little, cannot flip the design between
+    # passes (a pod with or without its strip, a rod, a bare beam: up to ~3 g apart; the
+    # start car flipped every pass). None chooses it from this body.
+    if mode == "bare":
+        pod = False
+    if mode in ("pod_strip", "pod_plate", "rod") and not pod:
+        mode_misfit = f"held design {mode}, but no pod channel fits this body"
+    else:
+        mode_misfit = None
+    if mode == "pod_plate" and bs.strip and pod:
+        return build(dataclasses.replace(bs, strip=False), x_axle_mm, z_axle_mm, y_inner_mm, wheel_width_mm,
+                     disc, hub_mm=hub_mm, R_mm=R_mm, channel=channel, mode=mode)
     plate_h, xc = bs.beam_h_mm, x_axle_mm + bs.x_offset_mm
     zc = z_axle_mm + bs.z_offset_mm
     z_strip = None
@@ -402,16 +432,17 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
             st["strip_fit_mm"] = min(tie, room)
             st["strip_fit_note"] = (f"body floor at the axle z {channel['z_floor_mm']:.2f} puts the strip at "
                                     f"z {z_strip:.2f}: {room:.2f} mm under the plate, {tie:.2f} mm on the disc")
-            if st["strip_fit_mm"] < 0 and channel["z_floor_mm"] <= z_axle_mm:
+            misfit = st["strip_fit_mm"] < 0
+            if mode is None and misfit and channel["z_floor_mm"] <= z_axle_mm:
                 # The floor is LOW and still the strip does not fit (the load sizing made the
                 # plate too thick for the room): the floor-high rod would sit at the track, under
                 # the axle (cars 50105/0 ... 50322/0: 0.87 mm below the track, 14.7 mm from the
                 # axle). The frame is sized again without its strip instead: plate alone.
                 again = build(dataclasses.replace(bs, strip=False), x_axle_mm, z_axle_mm, y_inner_mm,
-                              wheel_width_mm, disc, hub_mm=hub_mm, R_mm=R_mm, channel=channel)
+                              wheel_width_mm, disc, hub_mm=hub_mm, R_mm=R_mm, channel=channel, mode="pod_plate")
                 again["_struct"]["strip_dropped_note"] = st["strip_fit_note"]
                 return again
-            if st["strip_fit_mm"] < 0:
+            if (mode is None and misfit) or mode == "rod":
                 # FLOOR-HIGH: the pod frame does not fit under this body, so a round rod in a
                 # slot milled up into the body's floor, its top FLOOR_EMBED_MM into the foam
                 # but inside the wheel's cylinder (T7.12.1); the neck below joins it to the
@@ -450,7 +481,7 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
     prof += line + [(0.0, y_tip)]
     # with a pod the plate stops a lap inside it: the pod's roof carries on
     y_plate0 = max(0.0, channel["y_body_at_plate_mm"] - bs.plate_lap_mm) if pod else 0.0
-    plate = _extrude_xz(section(bs_sized), y_plate0, y_beam_end + 0.05, xc, zc)
+    plate = _extrude_xz(printable_section(bs_sized), y_plate0, y_beam_end + 0.05, xc, zc)
     # T7.13: the claw hooks the wheel's inner corner (CLAW_LIP_MM in from the inner
     # face, over the outer CLAW_LIP_MM of radius). Inside that band the plate keeps
     # within R - lip of the axle, so a pod-high plate steps down to the disc there.
@@ -464,7 +495,7 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
         st["claw_neck_stress_mpa"] = M / neck_section_modulus_mm3(neck)
         keep = _revolve_y([(0.0, y_claw - 0.1), (rk, y_claw - 0.1), (rk, y_beam_end + 1.0), (0.0, y_beam_end + 1.0)],
                           x_axle_mm, z_axle_mm)
-        inboard = _extrude_xz(section(bs_sized), y_plate0, y_claw, xc, zc)
+        inboard = _extrude_xz(printable_section(bs_sized), y_plate0, y_claw, xc, zc)
         body = plate
         dz = zc - z_axle_mm
         if abs(dz) > 0.05:       # a plate at the axle's level needs no web (and has none to extrude)
@@ -478,7 +509,7 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
         plate = trimesh.boolean.union([inboard, outboard], engine="manifold")
     parts = [plate, _revolve_y(prof, x_axle_mm, z_axle_mm)]
     if pod and bs.strip and st["strip_fit_mm"] >= 0:
-        parts.append(_extrude_xz(section(dataclasses.replace(bs, beam_w_mm=bs.strip_w_mm,
+        parts.append(_extrude_xz(printable_section(dataclasses.replace(bs, beam_w_mm=bs.strip_w_mm,
                                                              beam_h_mm=bs.strip_h_mm)),
                                  0.0, y_beam_end + 0.05, x_axle_mm, z_strip))
     part = trimesh.boolean.union(parts, engine="manifold")
@@ -498,8 +529,11 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
         cap = _revolve_y([(0.0, y_tip), (STUB_D_MM / 2, y_tip), (STUB_D_MM / 2, y_tip - hub_len),
                           (hub_r, y_tip - hub_len), (hub_r, y_tip), (bs.hubcap_r_mm, y_tip),
                           (bs.hubcap_r_mm, y_out), (0.0, y_out)], x_axle_mm, z_axle_mm)
+    if mode_misfit:
+        st["mode_misfit_note"] = mode_misfit
     return {"support": part, "hubcap": cap, "_section_centre_mm": (xc, zc), "_struct": st, "_bs": bs_sized,
-            "_pod": pod, "_floor_high": floor_high}
+            "_pod": pod, "_floor_high": floor_high,
+            "support_mode": "rod" if floor_high else ("pod_strip" if pod and bs.strip else ("pod_plate" if pod else "bare"))}
 
 
 def gates(bs: BeamSupport, meshes: dict, x_axle_mm: float, z_axle_mm: float, R_mm: float,
@@ -512,6 +546,8 @@ def gates(bs: BeamSupport, meshes: dict, x_axle_mm: float, z_axle_mm: float, R_m
          # loads: margins in MPa and mm
          f"load_{tag}_stub_stress": st["allow_mpa"] - st["stress_mpa"],
          f"load_{tag}_bearing_sag": SAG_MAX_MM - st["sag_mm"]}
+    if "mode_misfit_note" in st:           # the held design no longer fits: refused, named
+        g[f"fit_{tag}_held_support_design"] = -1.0
     if "floor_embed_mm" in st:
         g[f"fit_{tag}_floor_rod_embed"] = st["floor_embed_mm"] - FLOOR_EMBED_MM
         g[f"load_{tag}_floor_rod_stress"] = st["allow_mpa"] - st["floor_rod_stress_mpa"]

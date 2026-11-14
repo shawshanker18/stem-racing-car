@@ -69,6 +69,21 @@ def build_body(a, out: Path):
                "build": getattr(g, "build_report", {})}
 
 
+
+def deviation(a_stl, b_stl, n: int = 20000, seed: int = 0) -> dict:
+    """Two-way distance between two surfaces (mm): Hausdorff (largest) and mean, from n points sampled
+    on each, measured to the other surface. Used to show the CFD STL is the judged body."""
+    import numpy as np
+    import trimesh
+    A, B = (trimesh.load(str(p), force="mesh") for p in (a_stl, b_stl))
+    out = []
+    for P, Q in ((A, B), (B, A)):
+        pts, _ = trimesh.sample.sample_surface(P, n, seed=seed)
+        _, d, _ = trimesh.proximity.closest_point(Q, pts)
+        out.append(d)
+    d = np.concatenate(out) * 1e3
+    return {"hausdorff_mm": float(d.max()), "mean_mm": float(d.mean()), "p99_mm": float(np.percentile(d, 99))}
+
 def parts_and_joints(a, out: Path, geom, body_stl: Path, parts_dir: str, **p4kw) -> dict:
     """Part 4 parts on this body, then the joints: every printed part becomes a
     positive glued into a milled pocket (Part 4 joints.py). The mass the
@@ -186,7 +201,7 @@ def part4_kwargs(a) -> dict:
     # The body ends at Ref A; the nose cone is a printed SLS PA12 shell (team
     # spec 2026-09-27) whose root takes the body's section 1 mm aft of Ref A.
     import nose as ns
-    nk = dict(blend_after_ref_a_mm=1.0, root_scale=1.0, material="PA12", wall_mm=0.8)
+    nk = dict(blend_after_ref_a_mm=1.0, root_scale=1.0, material="ABS", wall_mm=1.0)
     if getattr(a, "nose_json", None):
         nk.update(json.loads(a.nose_json))
     kw = {"support": sup, "nose": ns.NoseCone(**nk)}
@@ -401,6 +416,8 @@ def parse_args(argv=None):
     ap.add_argument("--trust-mm", type=float, default=1.0)
     ap.add_argument("--smooth-mm", type=float, default=0.0)
     ap.add_argument("--keep-runs", action="store_true")
+    ap.add_argument("--gate-only", action="store_true",
+                    help="build, judge and make the CFD STL, then measure its distance to the judged body; no CFD")
     ap.add_argument("--cfd-if-legal", action="store_true",
                     help="skip the CFD if the car already broke a rule: an hour of a machine for a car the search must drop")
     ap.add_argument("--stage-timeout-s", type=int, default=None,
@@ -462,6 +479,10 @@ def main(argv=None):
     chk = legality.check(str(out / "body_half.stl"), asm, S["mass"], S["body"]["field_bodies"],
                          machined_stl=asm["joints"].get("machined_body_half_stl"))
     S["legality"] = {"checks": chk, "summary": legality.summary(chk)}
+    sha = lambda p: __import__("hashlib").sha256(Path(p).read_bytes()).hexdigest()
+    S["hashes"] = {"judged_body_half_stl": sha(out / "body_half.stl")}
+    if getattr(a, "phi_npy", None) and a.phi_npy != "block":
+        S["hashes"]["field_npy"] = sha(a.phi_npy)
     moi = asm["wheel_moi_kg_m2"]
 
     # A fixed skin is not sized for T3.6, so that one rule cannot count against it.
@@ -469,12 +490,23 @@ def main(argv=None):
               if not (f == "T3.6_mass" and getattr(a, "skin_mm", None) is not None)]
     if a.cfd and a.cfd_if_legal and broken:
         log(f"4 CFD skipped: the car broke {broken}")
+    elif a.gate_only:
+        gate = b.run_quality_gates(copy.deepcopy(geom), "initial", str(out / "gates"))
+        if not gate.stl_half_path:
+            raise SystemExit(f"initial body failed the CFD gate: {gate.failure_reason}")
+        S["hashes"]["timed_cfd_stl"] = sha(gate.stl_half_path)
+        S["decimation"] = deviation(gate.stl_half_path, out / "body_half.stl")
+        log(f"GATE decimation {S['decimation']}")
     elif a.cfd:
         log("4 CFD: forward, all patches")
+        # the body timed is the body judged: the same file, unchanged since the referee read it
+        if sha(out / "body_half.stl") != S["hashes"]["judged_body_half_stl"]:
+            raise SystemExit("body_half.stl changed between the legality check and CFD")
         # The same decimated STL the optimiser's gate would mesh.
         gate = b.run_quality_gates(copy.deepcopy(geom), "initial", str(out / "gates"))
         if not gate.stl_half_path:
             raise SystemExit(f"initial body failed the CFD gate: {gate.failure_reason}")
+        S["hashes"]["timed_cfd_stl"] = sha(gate.stl_half_path)       # the gate's decimated copy of the judged body
         S["cfd_initial"] = cfd_and_objective(b, Path(gate.stl_half_path), ms, moi, mu)
         S["whatif"] = what_if(b, ms, S["cfd_initial"], mu, moi)
 

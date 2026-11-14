@@ -73,4 +73,4 @@ def ref_plane_B(x_front_mm: float, W_mm: float) -> float:
 # 0.7 is a placeholder (SLS PA12 guidance) until the team gives its printer's figure; the
 # environment variable P4_MIN_WALL_MM overrides it, for checking other values.
 import os as _os
-MIN_WALL_MM = float(_os.environ.get("P4_MIN_WALL_MM", "0.7"))
+MIN_WALL_MM = float(_os.environ.get("P4_MIN_WALL_MM", "1.0"))   # the team's printer (2026-11-14)

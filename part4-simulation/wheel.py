@@ -17,7 +17,7 @@ import numpy as np
 
 # 3x6x2.5 mm miniature bearing (MR63 size): ~0.30 g, steel.
 BEARING_ID_MM, BEARING_OD_MM, BEARING_W_MM, BEARING_G = 3.0, 6.0, 2.5, 0.30
-PA12_G_CM3 = 1.01
+ABS_G_CM3 = 1.04             # the team prints ABS (team, 2026-11-14); generic ABS datasheet
 CAD = Path(__file__).resolve().parent.parent / "part1-simulation" / "hardware_cad"
 
 
@@ -102,7 +102,7 @@ def design(name: str = "team_stl") -> tuple:
     if name != "team_stl":
         raise ValueError(f"unknown wheel design {name!r}; the wheels are the team's STLs")
     out = []
-    rho = PA12_G_CM3 * 1e-3                       # g/mm3
+    rho = ABS_G_CM3 * 1e-3                       # g/mm3
     for seated, ax, _bore, _len in team_wheel_meshes():
         ext = seated.bounds[1] - seated.bounds[0]
         mc = seated.copy()

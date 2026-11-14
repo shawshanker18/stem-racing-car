@@ -36,7 +36,7 @@ class NoseCone:
     blend_after_ref_a_mm: float = 10.0   # root station, where the body is full size
     root_scale: float = 0.97      # root section vs the body's own
     wall_mm: float = max(0.8, cc.MIN_WALL_MM)   # printed shell, for mass; never under the print minimum
-    material: str = "PA12"        # the team's nose is an SLS PA12 shell (run_car passes the same)
+    material: str = "ABS"         # the team prints ABS (team, 2026-11-14; run_car passes the same)
 
 
 def body_section(body_half_mesh, x_mm: float) -> tuple:
