@@ -164,6 +164,8 @@ def run_car(item: str, ref: str | None, out: Path) -> Path:
     shutil.rmtree(o, ignore_errors=True)
     o.mkdir(parents=True)
     np.save(o / "field.npy", field(item))
+    import hashlib
+    expect = hashlib.sha256((o / "field.npy").read_bytes()).hexdigest()   # the carve.carve body asked for
     opt = {"layer_overrides": {"nSurfaceLayers": 0}}
     if ref:
         opt.update(morph_from=ref, warm_from=ref)
@@ -172,6 +174,7 @@ def run_car(item: str, ref: str | None, out: Path) -> Path:
     cmd = [sys.executable, "-W", "ignore", "run_car.py", "--out", str(o), "--skin-mm", SKIN, "--support", "beam",
            "--phi-npy", str(o / "field.npy"), "--cfd", "--cfd-if-legal", "--cfd-iters", ITERS, "--res", mesh(), "--np", "2",
            "--keep-runs", "--cfd-json", json.dumps(opt)]
+    assert "--phi-npy" in cmd and "--body-json" not in cmd and "--cfd-if-legal" in cmd, cmd   # carve body only, legality-gated
     p = subprocess.run(cmd, capture_output=True, text=True)
     if p.returncode != 0:
         marker = os.environ.get("P2_CHECKPOINT_FILE")
@@ -184,7 +187,8 @@ def run_car(item: str, ref: str | None, out: Path) -> Path:
     S = json.loads((o / "summary.json").read_text())
     failed = sorted(k for k, v in S["legality"]["checks"].items() if not v["pass"])
     if failed:                                            # the referee's check: an illegal car is never timed
-        rec = {"item": item, "legal": False, "failed": failed, "T_s": None}
+        rec = {"item": item, "legal": False, "failed": failed, "T_s": None, "expect_field_sha": expect,
+               "field_sha": S["hashes"].get("field_npy"), "judged_field_sha": S["hashes"].get("field_npy")}
         (o / "result.json").write_text(json.dumps(rec))
         shutil.rmtree(runs, ignore_errors=True)
         print(f"LAB {item}: ILLEGAL ({', '.join(failed)}), not timed", flush=True)
@@ -197,6 +201,9 @@ def run_car(item: str, ref: str | None, out: Path) -> Path:
         shutil.copytree(run, dst, ignore=shutil.ignore_patterns("processor*", "logs", "postProcessing"))
     c = S["cfd_initial"]
     rec = {"item": item, "legal": True, "T_s": c["T_at_target_s"], "D_N": c["D20_N"], "L_N": c["L_N"],
+           "expect_field_sha": expect, "field_sha": S["hashes"].get("field_npy"),
+           "judged_field_sha": S["hashes"].get("field_npy"), "judged_stl_sha": S["hashes"]["judged_body_half_stl"],
+           "timed_cfd_stl_sha": S["hashes"].get("timed_cfd_stl"),
            "converged": c["converged"], "morph_fallback": (run / "MORPH_FALLBACK").exists(),
            "parts_D_N": {k: v["D_N"] for k, v in (c.get("parts") or {}).items()}}
     (o / "result.json").write_text(json.dumps(rec, default=float))

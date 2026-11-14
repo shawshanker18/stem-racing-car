@@ -417,6 +417,10 @@ def main(argv=None):
     chk = legality.check(str(out / "body_half.stl"), asm, S["mass"], S["body"]["field_bodies"],
                          machined_stl=asm["joints"].get("machined_body_half_stl"))
     S["legality"] = {"checks": chk, "summary": legality.summary(chk)}
+    sha = lambda p: __import__("hashlib").sha256(Path(p).read_bytes()).hexdigest()
+    S["hashes"] = {"judged_body_half_stl": sha(out / "body_half.stl")}
+    if getattr(a, "phi_npy", None) and a.phi_npy != "block":
+        S["hashes"]["field_npy"] = sha(a.phi_npy)
     moi = asm["wheel_moi_kg_m2"]
 
     # A fixed skin is not sized for T3.6, so that one rule cannot count against it.
@@ -426,10 +430,14 @@ def main(argv=None):
         log(f"4 CFD skipped: the car broke {broken}")
     elif a.cfd:
         log("4 CFD: forward, all patches")
+        # the body timed is the body judged: the same file, unchanged since the referee read it
+        if sha(out / "body_half.stl") != S["hashes"]["judged_body_half_stl"]:
+            raise SystemExit("body_half.stl changed between the legality check and CFD")
         # The same decimated STL the optimiser's gate would mesh.
         gate = b.run_quality_gates(copy.deepcopy(geom), "initial", str(out / "gates"))
         if not gate.stl_half_path:
             raise SystemExit(f"initial body failed the CFD gate: {gate.failure_reason}")
+        S["hashes"]["timed_cfd_stl"] = sha(gate.stl_half_path)       # the gate's decimated copy of the judged body
         S["cfd_initial"] = cfd_and_objective(b, Path(gate.stl_half_path), ms, moi, mu)
         S["whatif"] = what_if(b, ms, S["cfd_initial"], mu, moi)
 

@@ -136,6 +136,21 @@ def plan(state: dict, direction, step) -> None:
             c["cands"] = {str(f): step(c["x"], d / n, f * c["scale"] * length) for f in SIZES}
 
 
+
+def _t(r, current: bool = False) -> float:
+    """A timing. On the farm a result is a dict: the race time, the referee's verdict and the hashes
+    of the field that was asked for, judged and timed. A step whose timed body is not the legal body
+    asked for is refused (never kept); the current car must always be valid."""
+    if not isinstance(r, dict):
+        return r                                   # the bench's bare numbers
+    ok = r.get("legal") is True and r.get("T_s") is not None and r.get("expect_field_sha") \
+        and r.get("expect_field_sha") == r.get("field_sha") == r.get("judged_field_sha")
+    if ok:
+        return r["T_s"]
+    if current:
+        raise ValueError(f"the current car's timing is not its legal, hashed body: {r}")
+    return float("inf")
+
 def advance(state: dict, results: dict, prior_sigma: float, shape_sigma: float) -> None:
     """shape_sigma: Part 2's measured car-to-car noise on the loop's mesh (s). Re-timing one shape
     repeats its own error, so it never averages away: the keep bar always carries 2 shape_sigma^2
@@ -150,11 +165,11 @@ def advance(state: dict, results: dict, prior_sigma: float, shape_sigma: float) 
             continue
         if c["phase"] == "search":
             for r in range(len(c["times"]), 2):
-                c["times"].append(results[case(c, f"cur{r}")])
+                c["times"].append(_t(results[case(c, f"cur{r}")], True))
             if len(c["times"]) == 2 and not c["pairs"]:
                 c["pairs"].append(tuple(c["times"][:2]))
             T0 = sum(c["times"]) / len(c["times"])
-            dT = {s: results[case(c, f"s{s}")] - T0 for s in c["cands"]}
+            dT = {s: _t(results[case(c, f"s{s}")]) - T0 for s in c["cands"]}
             c["timed"] += len(dT)
             c["slower"] += sum(v > 0 for v in dT.values())
             c["dT"] = dT
@@ -162,8 +177,8 @@ def advance(state: dict, results: dict, prior_sigma: float, shape_sigma: float) 
             c["phase"] = "confirm"
             continue
         n = c.get("nconf", CONFIRM)
-        conf = [results[case(c, f"conf{r}")] for r in range(n)]
-        cur = c["times"] + [results[case(c, f"curx{r}")] for r in range(n - CONFIRM)]
+        conf = [_t(results[case(c, f"conf{r}")]) for r in range(n)]
+        cur = c["times"] + [_t(results[case(c, f"curx{r}")], True) for r in range(n - CONFIRM)]
         T0 = sum(cur) / len(cur)
         sig = pooled_sigma(c, prior_sigma)
         # Bonferroni over the k candidates AND the LOOKS confirm looks (2, 4, 8 runs)
@@ -175,7 +190,7 @@ def advance(state: dict, results: dict, prior_sigma: float, shape_sigma: float) 
         if not keep and gain > 0 and copies_help and n < CONFIRM * 2 ** (LOOKS - 1):
             c["nconf"] = 2 * n                    # promising but not yet clear: time both more
             continue
-        c["pairs"] += [(conf[i], conf[i + 1]) for i in range(0, n - 1, 2)]
+        c["pairs"] += [(conf[i], conf[i + 1]) for i in range(0, n - 1, 2) if max(conf[i], conf[i + 1]) < float("inf")]
         c["pairs"] += [(cur[i], cur[i + 1]) for i in range(len(c["times"]), len(cur) - 1, 2)]
         c["nconf"] = CONFIRM
         c["history"].append({"round": c["round"], "scale": c["scale"], "best": float(c["best"]),
