@@ -711,6 +711,29 @@ def apply_adjoint_sensitivity_symmetric(
 update_phi = apply_adjoint_sensitivity_symmetric
 
 
+def _wall_half(grid: np.ndarray, spacing_m: float):
+    """Per cell, the half thickness of the wall it lies on (metres; inf where it is on no wall)."""
+    d = spacing_m
+    depth = -np.asarray(grid, dtype=np.float64)
+    g = np.stack(np.gradient(np.asarray(grid, dtype=np.float64), d))
+    n = g / (np.linalg.norm(g, axis=0) + 1e-30)
+    out = np.full(depth.shape, np.inf)
+    for a in range(depth.ndim):
+        sl = lambda s: tuple(slice(1 + s, depth.shape[k] - 1 + s) if k == a else slice(None)  # noqa: E731
+                             for k in range(depth.ndim))
+        c, m, p = depth[sl(0)], depth[sl(-1)], depth[sl(1)]
+        nm, np_ = n[(slice(None),) + sl(-1)], n[(slice(None),) + sl(1)]
+        s = np.minimum(np.maximum(c - m, c - p) / d, 1.0)
+        half = np.where((c > 0) & (c >= m) & (c >= p) & ((nm * np_).sum(0) < -0.5), (m + p) / 2.0 + s * d, np.inf)
+        out[sl(0)] = np.minimum(out[sl(0)], half)
+    return out
+
+
+def min_wall_mm(grid: np.ndarray, spacing_m: float) -> float:
+    """The body's thinnest wall straight across, mm (inf if it has no wall). See thin_wall_mask."""
+    return float(2e3 * _wall_half(grid, spacing_m).min())
+
+
 def thin_wall_mask(grid: np.ndarray, spacing_m: float, min_wall_m: float) -> np.ndarray:
     """Solid cells on a wall thinner than min_wall_m, measured straight across.
 
@@ -720,21 +743,7 @@ def thin_wall_mask(grid: np.ndarray, spacing_m: float, min_wall_m: float) -> np.
     is not a wall). The wall's half thickness is the peak of the depth tent through the three
     samples: (d- + d+) / 2 + s * spacing, s the steeper side's slope (<= 1), so the measure is
     sub-cell and does not depend on where the cells fall in the wall."""
-    d = spacing_m
-    depth = -np.asarray(grid, dtype=np.float64)
-    g = np.stack(np.gradient(np.asarray(grid, dtype=np.float64), d))
-    n = g / (np.linalg.norm(g, axis=0) + 1e-30)
-    out = np.zeros(depth.shape, bool)
-    for a in range(depth.ndim):
-        sl = lambda s: tuple(slice(1 + s, depth.shape[k] - 1 + s) if k == a else slice(None)  # noqa: E731
-                             for k in range(depth.ndim))
-        c, m, p = depth[sl(0)], depth[sl(-1)], depth[sl(1)]
-        nm, np_ = n[(slice(None),) + sl(-1)], n[(slice(None),) + sl(1)]
-        s = np.minimum(np.maximum(c - m, c - p) / d, 1.0)
-        half = (m + p) / 2.0 + s * d
-        hit = (c > 0) & (c >= m) & (c >= p) & ((nm * np_).sum(0) < -0.5) & (half < min_wall_m / 2.0)
-        out[sl(0)] |= hit
-    return out
+    return _wall_half(grid, spacing_m) < min_wall_m / 2.0
 
 
 def apply_adjoint_to_unified(

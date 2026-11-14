@@ -59,3 +59,20 @@ def test_carve_leaves_no_new_thin_wall():
     g, reps = carve.carve(lay, [{"bias_mm": -2.5, "trust_mm": 2.0}] * 4, spacing_mm=2.0)
     assert not (thin_wall_mask(g.phi.grid, GRID_SPACING_M, 3.0e-3) & ~t0).any()
     assert all(r["status"] == "ok" or r["reason"] == "min_wall" for r in reps), reps
+
+
+def test_finished_body_reports_and_gates_its_wall(tmp_path):
+    """cutter.finish measures the sized, milled body's thinnest wall and refuses it under
+    3.0 mm; sizing never searched a skin below the wall-legal one."""
+    import carve
+    import cutter
+    lay = {"W": 120.3, "x_front": 46.0, "d_halo": 43.72}
+    g, _ = carve.carve(lay, [{"bias_mm": -1.5, "trust_mm": 2.0}], spacing_mm=2.0)
+    res = cutter.finish(g, lay, target_body_g=50.0, out_dir=tmp_path)
+    w = res["min_machined_wall_mm"]
+    assert w is not None
+    assert (res["status"] != "ok") or w >= 3.0, res
+    if res["status"] == "refused" and res["reason"].startswith("min_wall"):
+        assert w < 3.0
+    tried = res["report"]["sizing_tried"]
+    assert min(t[0] for t in tried) >= res["report"]["skin_lo_mm"] - 1e-9

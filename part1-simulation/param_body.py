@@ -306,6 +306,15 @@ def build(W_mm: float, x_front_mm: float, d_halo_mm: float, bp: BodyParams,
             bar |= r2 <= 2.0 ** 2
         return bar if bar.any() else None
 
+    # The team's 3.0 mm machined wall (2026-11-14): a skin thinner than this would take the
+    # body's thinnest wall under the limit, so sizing never searches below it. Each build also
+    # measures its own thinnest wall (milling and the stamps act after the skin), and that is
+    # the gate: build_report["min_machined_wall_mm"], refused by cutter.finish under 3.0.
+    from geometry_contract import MIN_MACHINED_WALL_MM
+    from phi_updater import min_wall_mm
+    _w0 = min_wall_mm(np.asarray(phi0, dtype=np.float64) * 1e-3, d)
+    skin_lo = max(-8.0, -(_w0 - MIN_MACHINED_WALL_MM) / 2.0) if np.isfinite(_w0) else -8.0
+
     def make(offset_mm, bar_to=None, bridges=None, tries=0):
         import copy
         from scipy.ndimage import label
@@ -371,7 +380,8 @@ def build(W_mm: float, x_front_mm: float, d_halo_mm: float, bp: BodyParams,
         rep["islands_after_stamp_mm3"] = _drop_islands(g) * (d * 1e3) ** 3
         rep["pinch_cells_after_stamp"] = _close_pinches(g, d)
         g.spacing_m = d
-        g.build_report = dict(rep, skin_offset_mm=offset_mm, join_rounds=tries)
+        g.build_report = dict(rep, skin_offset_mm=offset_mm, join_rounds=tries,
+                              min_machined_wall_mm=min_wall_mm(g.phi.grid, d), skin_lo_mm=skin_lo)
         return g
 
     def mass(g):
@@ -383,7 +393,8 @@ def build(W_mm: float, x_front_mm: float, d_halo_mm: float, bp: BodyParams,
         return make(0.0)
     # Secant on the skin offset; mass is monotone in it. 0.05 g is well inside
     # the voxel-count noise of the mass itself (~0.3 g at 1 mm).
-    a, b = -2.0, 4.0
+    a = max(-2.0, skin_lo)
+    b = max(4.0, a + 6.0)
     ga, gb = make(a), make(b)
     evals = 2                                # whole builds spent on sizing (BUILD_SPEC: at most 16)
     fa, fb = mass(ga) - target_body_kg, mass(gb) - target_body_kg
@@ -399,7 +410,7 @@ def build(W_mm: float, x_front_mm: float, d_halo_mm: float, bp: BodyParams,
     # secant then wandered below and gave up 0.29 g light, under the 48 g floor, with
     # nothing tried past 4.3 mm while the block reaches 54 g at 15 mm (1 of 200 carved
     # bodies, 2026-11-09). Step the skin out (or in) until the target is crossed.
-    for out_to, in_to in ((8.0, -5.0), (15.0, -8.0)):
+    for out_to, in_to in ((max(8.0, b + 4.0), max(-5.0, skin_lo)), (15.0, skin_lo)):
         if fa < 0 and fb < 0:
             c = out_to
         elif fa > 0 and fb > 0:
@@ -418,7 +429,7 @@ def build(W_mm: float, x_front_mm: float, d_halo_mm: float, bp: BodyParams,
     for _ in range(6):
         if abs(fb - fa) < 1e-9:
             break
-        c = float(np.clip(b - fb * (b - a) / (fb - fa), -8.0, 15.0))
+        c = float(np.clip(b - fb * (b - a) / (fb - fa), skin_lo, 15.0))
         evals += 1
         gc = make(c)
         fc = mass(gc) - target_body_kg
@@ -460,7 +471,10 @@ def build(W_mm: float, x_front_mm: float, d_halo_mm: float, bp: BodyParams,
     trim_mm, trim_evals = 0.0, 0
     if best[0] >= 5e-5:
         if over is not None:
-            g_t, trim_mm, trim_evals = _shave_to(over[1], target_body_kg, mass, d, (X, Y, Z))
+            # the shave thins every wall by its depth: never past the 3.0 mm limit
+            room = (over[1].build_report.get("min_machined_wall_mm", np.inf) - MIN_MACHINED_WALL_MM) / 2.0
+            g_t, trim_mm, trim_evals = _shave_to(over[1], target_body_kg, mass, d, (X, Y, Z),
+                                                 max_mm=float(np.clip(room, 0.0, 1.0)))
             if g_t is not None:
                 g = g_t
     # The mass steps as flat faces cross grid cells, and the closest car can be the one
@@ -469,6 +483,7 @@ def build(W_mm: float, x_front_mm: float, d_halo_mm: float, bp: BodyParams,
     if mass(g) - target_body_kg < -5e-5:
         if over is not None and mass(over[1]) - target_body_kg < 1e-3:
             g = over[1]
+    g.build_report["min_machined_wall_mm"] = min_wall_mm(g.phi.grid, d)      # the body as finished (after any shave)
     g.build_report["mass_error_g"] = (mass(g) - target_body_kg) * 1e3
     g.build_report["sizing_builds"] = evals
     g.build_report["trim_mm"], g.build_report["trim_evals"] = trim_mm, trim_evals
@@ -478,7 +493,7 @@ def build(W_mm: float, x_front_mm: float, d_halo_mm: float, bp: BodyParams,
     # envelope: 47.54 g at 8 and 15 mm on a W 121.6 layout, 2026-11-11) or over it at the
     # thinnest. No skin reaches the target: the layout is refused, never sized.
     g.build_report["mass_unreachable"] = (all(t[1] < 0 for t in tried) and max(t[0] for t in tried) >= 15.0
-                                          or all(t[1] > 0 for t in tried) and min(t[0] for t in tried) <= -8.0)
+                                          or all(t[1] > 0 for t in tried) and min(t[0] for t in tried) <= skin_lo + 1e-9)
     # Too light at the thickest skin: the car carries ballast for the rest (user, 2026-11-11);
     # the layout stays. Part 4 reads this.
     g.build_report["ballast_needed_g"] = (max(0.0, -g.build_report["mass_error_g"])

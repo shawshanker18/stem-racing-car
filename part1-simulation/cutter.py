@@ -108,7 +108,7 @@ def finish(geom, layout: dict, target_body_g: float, out_dir) -> dict:
       body_half.stl    watertight right half (y >= 0), for CFD (Part 4 adds the parts)
       body.stl         the whole finished body
       cut.json         the verdict and report below
-    Returns the cut.json dict: status "ok" or "refused" with reason mass_unreachable,
+    Returns the cut.json dict: status "ok" or "refused" with reason mass_unreachable, min_wall,
     open_surface or mesh_quality; mass_g, com_m, skin_offset_mm and the build report."""
     import json
     from pathlib import Path
@@ -142,6 +142,11 @@ def finish(geom, layout: dict, target_body_g: float, out_dir) -> dict:
     if not light and (br.get("mass_unreachable") or err is None or abs(err) > 0.05):                  # the sizing tolerance (BUILD_SPEC 12.4)
         res.update(status="refused", reason=f"mass_unreachable: {err} g from target"
                    + (" (no skin reaches it)" if br.get("mass_unreachable") else ""))
+    from geometry_contract import MIN_MACHINED_WALL_MM
+    res["min_machined_wall_mm"] = br.get("min_machined_wall_mm")
+    if res["status"] == "ok" and (br.get("min_machined_wall_mm") or 0.0) < MIN_MACHINED_WALL_MM:
+        res.update(status="refused", reason=f"min_wall: thinnest machined wall {br.get('min_machined_wall_mm')} mm, "
+                                            f"under {MIN_MACHINED_WALL_MM} mm")
     if res["status"] == "ok":
         half = up.extract_half_surface(body)
         half.vertices[half.vertices[:, 1] < 0, 1] = 0.0
