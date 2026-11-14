@@ -126,11 +126,13 @@ def _mesh_wall(path):
                                  np.round(vox.indices_to_points(idx.max(0)), 1).tolist()]})
     n = np.asarray(m.vertex_normals)
     o = np.asarray(m.vertices) - n * 1e-3
-    loc, ri, ti = m.ray.intersects_location(o, -n, multiple_hits=False)
     t = np.full(len(o), np.inf)
     opp = np.zeros(len(o), bool)
-    t[ri] = np.linalg.norm(loc - o[ri], axis=1)
-    opp[ri] = (m.face_normals[ti] * n[ri]).sum(1) < -0.5
+    for s in range(0, len(o), 20000):              # chunks: the same exact rays, bounded memory
+        e = min(s + 20000, len(o))
+        loc, ri, ti = m.ray.intersects_location(o[s:e], -n[s:e], multiple_hits=False)
+        t[s + ri] = np.linalg.norm(loc - o[s + ri], axis=1)
+        opp[s + ri] = (m.face_normals[ti] * n[s + ri]).sum(1) < -0.5
     w = (t < 3.0) & opp
     bins = {}
     for q in np.round(np.asarray(m.vertices)[w] / 5.0) * 5.0:
@@ -166,4 +168,6 @@ for p in sorted(out.glob(f"car_{seed}_*.json"), key=lambda p: int(p.stem.split("
                                "seconds": r.get("seconds"), "peak_gb": r.get("peak_gb")}), flush=True)
 if "meshwall" in MODE:
     for p in sorted(Path("../kept").rglob("machined_body.stl")):
-        print("LAB meshwall " + json.dumps({"seed": seed, "dir": p.parent.name, **_mesh_wall(p)}), flush=True)
+        gate = [json.loads(q.read_text()).get("min_wall_mm") for q in out.glob(f"car_{seed}_*.json")]
+        print("LAB meshwall " + json.dumps({"seed": seed, "dir": p.parent.name, "gate_min_wall_mm": gate,
+                                            **_mesh_wall(p)}), flush=True)
