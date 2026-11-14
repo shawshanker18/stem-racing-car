@@ -76,7 +76,7 @@ def test_pod_to_rod_switch_just_inside_and_just_outside():
     assert above["_floor_high"] and not above["_pod"]
     for out, g in ((below, gb), (above, ga)):
         _common(out, g)
-        assert all(m >= 0 for k, m in g.items() if k.startswith("fit_")), g
+        assert all(m >= 0 for k, m in g.items() if k.startswith("fit_")), {k: m for k, m in g.items() if k.startswith("fit_") and m < 0}
 
 
 def test_a_loose_piece_stops_the_build():
@@ -129,10 +129,10 @@ def test_floor_high_car_is_built_milled_judged_and_timed_as_one_rod():
 def test_low_floor_with_a_thick_plate_drops_the_strip_not_into_a_rod():
     # cars 50105/0 ... 50322/0 (aade33c): a low floor, but the plate too thick for the strip
     # to fit under it; the rod went to the track (0.87 mm below it, 14.7 mm from the axle)
-    out, g = _build(5.0, top_mm=27.0, bs=bsm.BeamSupport(beam_h_mm=6.0))
+    out, g = _build(12.0, top_mm=27.0, bs=bsm.BeamSupport(beam_h_mm=6.0))   # strip at 14.5 cannot fit under a 6 mm plate
     assert out["_pod"] and not out["_floor_high"]
     assert "strip_dropped_note" in out["_struct"]
     _common(out, g)
     v = out["support"].vertices * 1e3
     assert v[:, 2].min() >= 1.5                                           # T3.7
-    assert all(m >= 0 for k, m in g.items() if k.startswith("fit_")), g
+    assert all(m >= 0 for k, m in g.items() if k.startswith("fit_")), {k: m for k, m in g.items() if k.startswith("fit_") and m < 0}

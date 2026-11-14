@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import trimesh
 
-RUN, REPO = int(os.environ.get("WALL_RUN", "43621396051")), os.environ.get("WALL_REPO", os.environ["GITHUB_REPOSITORY"])
+RUN, REPO = int(os.environ.get("WALL_RUN", "43629222420")), os.environ.get("WALL_REPO", os.environ["GITHUB_REPOSITORY"])
 d = Path("../out/files/wall")
 subprocess.run(["gh", "run", "download", str(RUN), "-R", REPO, "-D", str(d)], check=False)
 for f in sorted(glob.glob(str(d / "**" / "printed_*.stl"), recursive=True)):
@@ -23,9 +23,9 @@ for f in sorted(glob.glob(str(d / "**" / "printed_*.stl"), recursive=True)):
     cosang = (m.face_normals[tri] * nrm[ray]).sum(axis=1)
     opp = cosang < -0.5
     dist = np.linalg.norm(loc - pts[ray], axis=1)
-    thin = opp & (dist < 0.7)
+    thin = opp & (dist < 1.0)
     print(f"FILE {Path(f).name}: closed {m.is_volume} faces {len(m.faces)} samples {len(pts)} "
-          f"opposite-hits {opp.sum()} thin(<0.7) {thin.sum()} ({100 * thin.sum() / max(opp.sum(), 1):.2f} %)", flush=True)
+          f"opposite-hits {opp.sum()} thin(<1.0) {thin.sum()} ({100 * thin.sum() / max(opp.sum(), 1):.2f} %)", flush=True)
     if not thin.any():
         continue
     tp = pts[ray[thin]]
@@ -35,10 +35,10 @@ for f in sorted(glob.glob(str(d / "**" / "printed_*.stl"), recursive=True)):
         p, n = tp[i], nrm[ray[thin]][i]
         # second measure: step inward; the largest distance to the surface on the way is the
         # radius of the biggest ball that fits there (half the wall for a slab)
-        steps = p - np.outer(np.linspace(0.01, 0.7, 70), n)
+        steps = p - np.outer(np.linspace(0.01, 1.2, 120), n)
         inside = m.contains(steps)
         cd = trimesh.proximity.closest_point(m, steps)[1]
         ball = float(2 * cd[inside].max()) if inside.any() else 0.0
         print(f"   at {np.round(p, 3).tolist()} ray {dist[thin][i]:.4f} mm, faces at "
               f"{np.degrees(np.arccos(np.clip(-cosang[thin][i], -1, 1))):.1f} deg from antiparallel, "
-              f"inscribed ball diameter {ball:.4f} mm, points inside {int(inside.sum())}/70", flush=True)
+              f"inscribed ball diameter {ball:.4f} mm, points inside {int(inside.sum())}/120", flush=True)
