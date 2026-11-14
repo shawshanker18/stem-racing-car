@@ -125,7 +125,9 @@ def carve_field(c: dict, path: Path) -> None:
     lay = {"W": 120.3, "x_front": 46.0, "d_halo": 43.72,
            **{k: v for k, v in c.get("layout", {}).items() if k in ("W", "x_front", "d_halo")}}
     reps = carve.save(lay, carve_edits(c), path)
-    c.setdefault("layout", {})["cuts"] = [r["status"] if r["status"] == "ok" else r["reason"][:40] for r in reps]
+    # "ok:<sub-steps>" (+ "w" when the 3.0 mm wall ended the cut early), or the refusal reason
+    c.setdefault("layout", {})["cuts"] = [f"ok:{r.get('substeps')}" + ("w" if r.get("min_wall_stop") else "")
+                                         if r["status"] == "ok" else r["reason"][:40] for r in reps]
 
 
 def build_one(c: dict) -> dict:
