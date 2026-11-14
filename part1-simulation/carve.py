@@ -18,7 +18,7 @@ Each edit is one cutter.cut, applied in order:
                         (the stress recipe); False: the speed is the move in mm, as given
      "trust_mm": 1.0, "substeps": 6}
     {"tunnel": {"ft_h": h, "ft_w": w, "ft_x0": x0, "ft_x1": x1, "ft_ramp": r}}   the underfloor
-                        tunnel of param_body as one cut: the underside (downward faces) with
+                        tunnel of param_body as one cut: the underside (lowest points of each x slice) with
                         |y| < ft_w moves up ft_h mm in the middle, easing to 0 over ft_ramp mm at
                         x0 and x1 (car x, mm). The cutter keeps the rules and the ball-end reach,
                         so the channel is the legal, millable version of the loft tunnel
@@ -33,11 +33,20 @@ import warnings
 import numpy as np
 
 
-def _tunnel_mm(V_mm, N, t: dict) -> np.ndarray:
+def _tunnel_mm(V_mm, t: dict) -> np.ndarray:
+    """Underside points (within 1 mm of the lowest point of their 1 mm x slice, |y| < ft_w) move
+    up ft_h mm, eased to 0 over ft_ramp at x0 and x1. Picked by height, not normals: the half
+    mesh is open at y = 0, so its normal orientation is not reliable."""
     r = max(float(t.get("ft_ramp", 25.0)), 1e-3)
-    x = V_mm[:, 0]
+    x, w = V_mm[:, 0], float(t.get("ft_w", 8.0))
     ease = np.minimum(np.clip((x - t["ft_x0"]) / r, 0, 1), np.clip((t["ft_x1"] - x) / r, 0, 1))
-    under = (N[:, 2] < -0.5) & (np.abs(V_mm[:, 1]) < t.get("ft_w", 8.0))
+    band = np.abs(V_mm[:, 1]) < w
+    floor = np.full(len(V_mm), np.inf)
+    sl = np.floor(x).astype(int)
+    for k in np.unique(sl[band]):
+        m = band & (sl == k)
+        floor[m] = V_mm[m, 2].min()
+    under = band & (V_mm[:, 2] <= floor + 1.0)
     return -float(t["ft_h"]) * ease * under                   # thinning: the floor moves up
 
 
@@ -60,8 +69,7 @@ def carve(layout: dict, edits: list, spacing_mm: float = 1.0):
         h = extract_half_surface(g)
         V = np.asarray(h.vertices)                               # metres
         if "tunnel" in e:
-            N = np.asarray(h.vertex_normals) * (1.0 if h.volume >= 0 else -1.0)   # outward
-            s = _tunnel_mm(V * 1e3, N, e["tunnel"])
+            s = _tunnel_mm(V * 1e3, e["tunnel"])
             e = {"unit": False, **{k: v for k, v in e.items() if k != "tunnel"}}
         else:
             s = _speed_mm(V * 1e3, e)
