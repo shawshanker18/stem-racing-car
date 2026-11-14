@@ -50,6 +50,14 @@ RES = os.environ.get("P3_RES", "")       # required, no default mesh (user 2026-
 LOOP_MESHES = ("fine", "resolved")       # a carving-loop timing (P5_LOOP=1) may only use these
 
 
+
+def sized() -> bool:
+    """Every loop timing (P5_LOOP=1) is the SIZED car, the one that would be built: run_car sizes the
+    skin to the mass target and refuses a car that misses it (T3.6), so the timed shape is the built
+    shape. Maps use a fixed skin (P3_SKIN_MM) unless P3_SIZED=1, until a test shows the fixed-skin
+    and sized mode differences agree within the noise."""
+    return os.environ.get("P5_LOOP") == "1" or os.environ.get("P3_SIZED") == "1"
+
 def mesh() -> str:
     """The mesh for this timing: P3_RES must be set, and a loop timing must be fine or resolved."""
     if not RES:
@@ -171,7 +179,7 @@ def run_car(item: str, ref: str | None, out: Path) -> Path:
         opt.update(morph_from=ref, warm_from=ref)
     runs = Path("../part2-simulation/cfd_case_template/runs")
     shutil.rmtree(runs, ignore_errors=True)
-    cmd = [sys.executable, "-W", "ignore", "run_car.py", "--out", str(o), "--skin-mm", SKIN, "--support", "beam",
+    cmd = [sys.executable, "-W", "ignore", "run_car.py", "--out", str(o)] + ([] if sized() else ["--skin-mm", SKIN]) + ["--support", "beam",
            "--phi-npy", str(o / "field.npy"), "--cfd", "--cfd-if-legal", "--cfd-iters", ITERS, "--res", mesh(), "--np", "2",
            "--keep-runs", "--cfd-json", json.dumps(opt)]
     assert "--phi-npy" in cmd and "--body-json" not in cmd and "--cfd-if-legal" in cmd, cmd   # carve body only, legality-gated
@@ -185,7 +193,8 @@ def run_car(item: str, ref: str | None, out: Path) -> Path:
         raise RuntimeError(f"run_car failed on {item}")
     (o / "field.npy").unlink()
     S = json.loads((o / "summary.json").read_text())
-    failed = sorted(k for k, v in S["legality"]["checks"].items() if not v["pass"])
+    failed = sorted(k for k, v in S["legality"]["checks"].items() if not v["pass"]
+                    and not (k == "T3.6_mass" and not sized()))     # a fixed-skin map car is not sized; a loop car must be
     if failed:                                            # the referee's check: an illegal car is never timed
         rec = {"item": item, "legal": False, "failed": failed, "T_s": None, "expect_field_sha": expect,
                "field_sha": S["hashes"].get("field_npy"), "judged_field_sha": S["hashes"].get("field_npy")}
@@ -200,7 +209,7 @@ def run_car(item: str, ref: str | None, out: Path) -> Path:
         shutil.rmtree(dst, ignore_errors=True)
         shutil.copytree(run, dst, ignore=shutil.ignore_patterns("processor*", "logs", "postProcessing"))
     c = S["cfd_initial"]
-    rec = {"item": item, "legal": True, "T_s": c["T_at_target_s"], "D_N": c["D20_N"], "L_N": c["L_N"],
+    rec = {"item": item, "legal": True, "T_s": c["T_raw_s"] if sized() else c["T_at_target_s"], "sized": sized(), "D_N": c["D20_N"], "L_N": c["L_N"],
            "expect_field_sha": expect, "field_sha": S["hashes"].get("field_npy"),
            "judged_field_sha": S["hashes"].get("field_npy"), "judged_stl_sha": S["hashes"]["judged_body_half_stl"],
            "timed_cfd_stl_sha": S["hashes"].get("timed_cfd_stl"),
