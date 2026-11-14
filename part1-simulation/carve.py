@@ -17,6 +17,11 @@ Each edit is one cutter.cut, applied in order:
      "unit": True,      True: the speed is scaled to peak 1 and the cut moves at most trust_mm
                         (the stress recipe); False: the speed is the move in mm, as given
      "trust_mm": 1.0, "substeps": 6}
+    {"tunnel": {"ft_h": h, "ft_w": w, "ft_x0": x0, "ft_x1": x1, "ft_ramp": r}}   the underfloor
+                        tunnel of param_body as one cut: the underside (downward faces) with
+                        |y| < ft_w moves up ft_h mm in the middle, easing to 0 over ft_ramp mm at
+                        x0 and x1 (car x, mm). The cutter keeps the rules and the ball-end reach,
+                        so the channel is the legal, millable version of the loft tunnel
 The surface speed at each half-surface vertex is bias + sum amp * exp(-d^2 / 2 sigma^2); the
 cutter grows the solid where it is positive. A refused cut leaves the field as it was and is
 named in its report.
@@ -26,6 +31,14 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
+
+
+def _tunnel_mm(V_mm, N, t: dict) -> np.ndarray:
+    r = max(float(t.get("ft_ramp", 25.0)), 1e-3)
+    x = V_mm[:, 0]
+    ease = np.minimum(np.clip((x - t["ft_x0"]) / r, 0, 1), np.clip((t["ft_x1"] - x) / r, 0, 1))
+    under = (N[:, 2] < -0.5) & (np.abs(V_mm[:, 1]) < t.get("ft_w", 8.0))
+    return -float(t["ft_h"]) * ease * under                   # thinning: the floor moves up
 
 
 def _speed_mm(V_mm: np.ndarray, e: dict) -> np.ndarray:
@@ -44,8 +57,14 @@ def carve(layout: dict, edits: list, spacing_mm: float = 1.0):
     g = cutter.start_block(lay, spacing_mm=spacing_mm)
     reports = []
     for e in edits:
-        V = np.asarray(extract_half_surface(g).vertices)         # metres
-        s = _speed_mm(V * 1e3, e)
+        h = extract_half_surface(g)
+        V = np.asarray(h.vertices)                               # metres
+        if "tunnel" in e:
+            N = np.asarray(h.vertex_normals) * (1.0 if h.volume >= 0 else -1.0)   # outward
+            s = _tunnel_mm(V * 1e3, N, e["tunnel"])
+            e = {"unit": False, **{k: v for k, v in e.items() if k != "tunnel"}}
+        else:
+            s = _speed_mm(V * 1e3, e)
         peak = float(np.abs(s).max())
         if peak == 0.0:
             reports.append({"status": "refused", "reason": "no_motion"})

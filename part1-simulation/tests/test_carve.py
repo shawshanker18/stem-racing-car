@@ -42,3 +42,28 @@ def test_stress_cars_goes_through_carve(tmp_path, monkeypatch):
     sc.carve_field(c, tmp_path / "a.npy")
     real(LAYOUT, sc.carve_edits(c), tmp_path / "b.npy", spacing_mm=2.0)
     assert _sha(np.load(tmp_path / "a.npy")) == _sha(np.load(tmp_path / "b.npy"))
+
+
+def test_tunnel_raises_the_floor_and_keeps_the_rules():
+    """The tunnel edit lifts the centreline floor in the middle of its run, keeps every rule
+    zone, and is repeatable."""
+    import carve
+    from geometry_contract import GRID_SPACING_M
+    ed = [{"tunnel": {"ft_h": 4.0, "ft_w": 8.0, "ft_x0": 80.0, "ft_x1": 130.0, "ft_ramp": 10.0}}]
+    g0, _ = carve.carve(LAYOUT, [], spacing_mm=2.0)
+    g1, rep = carve.carve(LAYOUT, ed, spacing_mm=2.0)
+    assert rep[0]["status"] == "ok", rep[0]
+    d = GRID_SPACING_M * 1e3
+    r = g1.region
+    x = r.origin_m[0] * 1e3 + d * np.arange(r.shape[0])
+    y = r.origin_m[1] * 1e3 + d * np.arange(r.shape[1])
+    z = r.origin_m[2] * 1e3 + d * np.arange(r.shape[2])
+    i, j = int(np.argmin(np.abs(x - 105.0))), int(np.argmin(np.abs(y)))
+
+    def floor(g):
+        col = g.phi.grid[i, j] < 0
+        return z[col].min()
+    assert floor(g1) > floor(g0) + 1.0
+    solid = g1.phi.grid < 0
+    assert not (solid & g1.phi.hard_mask_air).any() and not (~solid & g1.phi.hard_mask_solid).any()
+    assert _sha(carve.carve(LAYOUT, ed, spacing_mm=2.0)[0].phi.grid) == _sha(g1.phi.grid)
