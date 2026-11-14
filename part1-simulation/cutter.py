@@ -59,6 +59,8 @@ def cut(geom, dT_dn, half_mesh, step_m: float, max_substeps: int = 6,
       bad_input        sensitivity not one finite value per mesh vertex
       pinned_detached  forced-solid material is loose on entry, or the first sub-step
                        would cut it loose
+      min_wall         the first sub-step would leave a wall under 3.0 mm (MIN_MACHINED_WALL_MM);
+                       a later one just ends the step there (report["min_wall_stop"])
       no_motion        nothing moved (zero speed or zero step)
       rule_air_violated / rule_solid_violated   a rule zone ended up wrong (should never happen)
 
@@ -88,6 +90,7 @@ def cut(geom, dT_dn, half_mesh, step_m: float, max_substeps: int = 6,
     # pinned material already loose on entry is a broken input (T4.1); a loose piece from a
     # later sub-step just ends the step there, keeping the sub-steps before it
     reason = ("pinned_detached" if rep["detached_at_start"] or (rep["substeps"] == 0 and rep["pinned_detached"])
+              else "min_wall" if rep["substeps"] == 0 and rep.get("min_wall_stop")
               else "no_motion" if rep["substeps"] == 0 or rep["dt"] <= 0
               else "rule_air_violated" if rep["rule_air_violated"]
               else "rule_solid_violated" if rep["rule_solid_violated"]

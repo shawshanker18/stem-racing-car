@@ -711,6 +711,32 @@ def apply_adjoint_sensitivity_symmetric(
 update_phi = apply_adjoint_sensitivity_symmetric
 
 
+def thin_wall_mask(grid: np.ndarray, spacing_m: float, min_wall_m: float) -> np.ndarray:
+    """Solid cells on a wall thinner than min_wall_m, measured straight across.
+
+    A wall's mid-surface is a ridge of depth (-phi) between two faces that look opposite ways.
+    Along each axis a cell is on such a ridge when its depth is at least both neighbours' and
+    their normals are within 60 deg of opposite (a convex edge's two faces are not, so an edge
+    is not a wall). The wall's half thickness is the peak of the depth tent through the three
+    samples: (d- + d+) / 2 + s * spacing, s the steeper side's slope (<= 1), so the measure is
+    sub-cell and does not depend on where the cells fall in the wall."""
+    d = spacing_m
+    depth = -np.asarray(grid, dtype=np.float64)
+    g = np.stack(np.gradient(np.asarray(grid, dtype=np.float64), d))
+    n = g / (np.linalg.norm(g, axis=0) + 1e-30)
+    out = np.zeros(depth.shape, bool)
+    for a in range(depth.ndim):
+        sl = lambda s: tuple(slice(1 + s, depth.shape[k] - 1 + s) if k == a else slice(None)  # noqa: E731
+                             for k in range(depth.ndim))
+        c, m, p = depth[sl(0)], depth[sl(-1)], depth[sl(1)]
+        nm, np_ = n[(slice(None),) + sl(-1)], n[(slice(None),) + sl(1)]
+        s = np.minimum(np.maximum(c - m, c - p) / d, 1.0)
+        half = (m + p) / 2.0 + s * d
+        hit = (c > 0) & (c >= m) & (c >= p) & ((nm * np_).sum(0) < -0.5) & (half < min_wall_m / 2.0)
+        out[sl(0)] |= hit
+    return out
+
+
 def apply_adjoint_to_unified(
     geom,
     right_half_sensitivity: np.ndarray,
@@ -1080,7 +1106,13 @@ def apply_adjoint_to_unified(
         return True
 
     ok0 = _drop_islands()        # False: pinned material already detached
-    n_done, p90, pinned = 0, 0.0, False
+    # The team's 3.0 mm machined wall (2026-11-14): a sub-step that makes a wall thinner than
+    # MIN_MACHINED_WALL_MM where none was is undone and the step ends there, like a pinned
+    # piece. Walls already thin on entry (a rule zone's own design) are left to be reported.
+    from geometry_contract import MIN_MACHINED_WALL_MM
+    _wall_m = MIN_MACHINED_WALL_MM * 1e-3
+    thin0 = thin_wall_mask(phi.grid, GRID_SPACING_M, _wall_m)
+    n_done, p90, pinned, wall_stop = 0, 0.0, False, False
     for _k in range(max(1, int(max_substeps))):
         if step_dt <= 0:
             break
@@ -1090,6 +1122,11 @@ def apply_adjoint_to_unified(
         if not _drop_islands() and ok0:
             phi.grid = before
             pinned = True                      # this sub-step would cut pinned material loose
+            break
+        if (thin_wall_mask(phi.grid, GRID_SPACING_M, _wall_m) & ~thin0).any():
+            phi.grid = before
+            enforce_symmetry(geom)
+            wall_stop = True                   # this sub-step would leave a wall under 3.0 mm
             break
         n_done += 1
         if iface.any():
@@ -1127,4 +1164,5 @@ def apply_adjoint_to_unified(
             "disp_p90_m": float(np.percentile(moved, 90)),
             "machinability_filled": int(filled), "thin_cells": int(thin),
             "pinch_cells": int(pinches),
-            "pinned_detached": pinned, "detached_at_start": not ok0}
+            "pinned_detached": pinned, "detached_at_start": not ok0,
+            "min_wall_stop": wall_stop, "thin_wall_cells_at_start": int(thin0.sum())}

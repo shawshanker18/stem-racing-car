@@ -156,6 +156,11 @@ MODEL_BLOCK_BOTTOM_Z_MM: float = CHAMBER_AXIS_Z_MM - MODEL_BLOCK_BORE_ABOVE_BOTT
 MODEL_BLOCK_TOP_Z_MM: float = MODEL_BLOCK_BOTTOM_Z_MM + MODEL_BLOCK_HEIGHT_MM
 MODEL_BLOCK_SLOT_TOP_Z_MM: float = MODEL_BLOCK_BOTTOM_Z_MM + MODEL_BLOCK_SLOT_DEPTH_MM
 
+# The team's real milling limits (2026-11-14), overriding earlier assumptions: the foam body's
+# thinnest machined wall, and the ball-end cutter (6.35 mm, radius 3.175). Part 4's MIN_WALL_MM
+# (component_contract) is the PRINTED wall (1.0 mm ABS), a different limit.
+MIN_MACHINED_WALL_MM: float = 3.0
+
 # ── Halo rules (CONFIRMED by project owner) ────────────────────────────────
 HALO_MIN_Z_MM: float = 24.0       # 24 mm above track — confirmed rule
 HALO_MIN_Z_M:  float = HALO_MIN_Z_MM / 1000.0
