@@ -32,6 +32,7 @@ import numpy as np
 
 TOOL_R_MM = 3.125
 FOAM_G_CM3 = 0.163
+NOSE_CUT_BACK_MM = 0.05       # the printed nose's body part ends this far ahead of Ref A (nose_part)
 # Foam cut this much larger than the printed plug, per side. UNMEASURED: 0.1-0.2 mm
 # is the usual SLS PA12 range. Set it from the first test print.
 GLUE_GAP_MM = 0.15
@@ -361,7 +362,13 @@ def nose_part(body_half, x_ref_a_mm: float, tenon_mm: float = 8.0, tenon_half_w_
     """The printed nose: the body ahead of Ref A plus a tenon reaching
     `tenon_mm` aft of it (8 mm wide: the cutter needs >= 6.25)."""
     import trimesh
-    ahead = trimesh.creation.box(bounds=[[-1.0, -0.01, -0.01], [x_ref_a_mm / 1e3, 0.2, 0.2]])
+    # The body is cut NOSE_CUT_BACK_MM ahead of Ref A, not on it: the printed cone shell
+    # copies the body's section just aft of Ref A, so a cut exactly at Ref A ended the
+    # body's skin on the cone's skin and pinched one edge (4 faces) on the Ref A plane,
+    # which no remesh size could close (50135, 50250, 50323: 68-82 % slivers). The cone
+    # and the tenon (from Ref A - 1 mm) still overlap the gap. Nothing is measured at the
+    # cut: T8 limits are measured ahead of Ref A on the whole assembly, the datum is unmoved.
+    ahead = trimesh.creation.box(bounds=[[-1.0, -0.01, -0.01], [(x_ref_a_mm - NOSE_CUT_BACK_MM) / 1e3, 0.2, 0.2]])
     nose = _bool("intersection", [body_half, ahead])
     if nose is None or nose.is_empty or abs(nose.volume) < 1e-12:
         return None
