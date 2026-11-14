@@ -136,3 +136,31 @@ def test_low_floor_with_a_thick_plate_drops_the_strip_not_into_a_rod():
     v = out["support"].vertices * 1e3
     assert v[:, 2].min() >= 1.5                                           # T3.7
     assert all(m >= 0 for k, m in g.items() if k.startswith("fit_")), {k: m for k, m in g.items() if k.startswith("fit_") and m < 0}
+
+
+@pytest.mark.parametrize("floor_mm", [6.0, 9.4, 13.8, 20.0])
+def test_held_design_never_flips_for_a_small_skin_change(floor_mm):
+    # sizing moves the body's skin ~0.1 mm per pass; the design chosen on the first build
+    # is held, so a +-0.2 mm floor change cannot flip it (start car: +0.5 <-> +3.5 g per pass)
+    first, _ = _build(floor_mm)
+    mode = first["support_mode"]
+    for d in (-0.2, 0.2):
+        body = trimesh.creation.box(bounds=[[0.030, 0.0, (floor_mm + d) / 1e3], [0.222, 0.016, 0.040]])
+        bs = bsm.BeamSupport()
+        ch = bsm.pod_channel(bs, body, X, Z, R)
+        _, hub = wh.hub_span_mm()
+        out = bsm.build(bs, X, Z, Y_IN, W, True, hub_mm=hub, R_mm=R, channel=ch, mode=mode)
+        assert out["support_mode"] == mode, (floor_mm, d, mode, out["support_mode"])
+
+
+def test_a_held_design_that_no_longer_fits_is_refused_by_name():
+    out, _ = _build(5.0)
+    assert out["support_mode"] in ("pod_strip", "pod_plate")
+    body = trimesh.creation.box(bounds=[[0.030, 0.0, 0.0245], [0.222, 0.016, 0.040]])   # floor 24.5
+    bs = bsm.BeamSupport()
+    _, hub = wh.hub_span_mm()
+    held = bsm.build(bs, X, Z, Y_IN, W, True, hub_mm=hub, R_mm=R,
+                     channel=bsm.pod_channel(bs, body, X, Z, R), mode="pod_strip")
+    g = bsm.gates(bs, held, X, Z, R, "rear")
+    assert held["support_mode"] == "pod_strip"                            # not silently switched
+    assert g["fit_rear_strip_under_plate_on_disc"] < 0                     # refused, with its reason

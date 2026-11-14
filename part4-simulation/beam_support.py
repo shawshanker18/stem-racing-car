@@ -363,7 +363,7 @@ def neck_section_modulus_mm3(poly) -> float:
 
 def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float,
           wheel_width_mm: float, disc: bool, hub_mm: tuple = (5.25, 8.25),
-          R_mm: float = 14.12, channel: dict | None = None) -> dict:
+          R_mm: float = 14.12, channel: dict | None = None, mode: str | None = None) -> dict:
     """Right half of one axle's support, metres: plate, strip, disc, boss and
     stub as one piece, and the hubcap as its own. `hub_mm` is where the
     wheel's hub (its bearing seat) lies, measured from the wheel's inner
@@ -387,6 +387,19 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
         w = min(bs.beam_w_mm, bs.strip_w_mm) if bs.strip else bs.beam_w_mm
         st["disc_stress_mpa"] = 6 * (LOAD_RADIAL_N * (y_bear - y_disc) + LOAD_AXIAL_N * R_mm) / 2             / (w * disc_t ** 2)
     pod = bs.pod and bool(channel) and channel["length_mm"] > 2 * TOOL_R_MM + 1.0
+    # mode: the design held fixed (support_mode of an earlier build of this car), so that
+    # sizing the body, which moves its skin a little, cannot flip the design between
+    # passes (a pod with or without its strip, a rod, a bare beam: up to ~3 g apart; the
+    # start car flipped every pass). None chooses it from this body.
+    if mode == "bare":
+        pod = False
+    if mode in ("pod_strip", "pod_plate", "rod") and not pod:
+        mode_misfit = f"held design {mode}, but no pod channel fits this body"
+    else:
+        mode_misfit = None
+    if mode == "pod_plate" and bs.strip and pod:
+        return build(dataclasses.replace(bs, strip=False), x_axle_mm, z_axle_mm, y_inner_mm, wheel_width_mm,
+                     disc, hub_mm=hub_mm, R_mm=R_mm, channel=channel, mode=mode)
     plate_h, xc = bs.beam_h_mm, x_axle_mm + bs.x_offset_mm
     zc = z_axle_mm + bs.z_offset_mm
     z_strip = None
@@ -419,16 +432,17 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
             st["strip_fit_mm"] = min(tie, room)
             st["strip_fit_note"] = (f"body floor at the axle z {channel['z_floor_mm']:.2f} puts the strip at "
                                     f"z {z_strip:.2f}: {room:.2f} mm under the plate, {tie:.2f} mm on the disc")
-            if st["strip_fit_mm"] < 0 and channel["z_floor_mm"] <= z_axle_mm:
+            misfit = st["strip_fit_mm"] < 0
+            if mode is None and misfit and channel["z_floor_mm"] <= z_axle_mm:
                 # The floor is LOW and still the strip does not fit (the load sizing made the
                 # plate too thick for the room): the floor-high rod would sit at the track, under
                 # the axle (cars 50105/0 ... 50322/0: 0.87 mm below the track, 14.7 mm from the
                 # axle). The frame is sized again without its strip instead: plate alone.
                 again = build(dataclasses.replace(bs, strip=False), x_axle_mm, z_axle_mm, y_inner_mm,
-                              wheel_width_mm, disc, hub_mm=hub_mm, R_mm=R_mm, channel=channel)
+                              wheel_width_mm, disc, hub_mm=hub_mm, R_mm=R_mm, channel=channel, mode="pod_plate")
                 again["_struct"]["strip_dropped_note"] = st["strip_fit_note"]
                 return again
-            if st["strip_fit_mm"] < 0:
+            if (mode is None and misfit) or mode == "rod":
                 # FLOOR-HIGH: the pod frame does not fit under this body, so a round rod in a
                 # slot milled up into the body's floor, its top FLOOR_EMBED_MM into the foam
                 # but inside the wheel's cylinder (T7.12.1); the neck below joins it to the
@@ -515,8 +529,11 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
         cap = _revolve_y([(0.0, y_tip), (STUB_D_MM / 2, y_tip), (STUB_D_MM / 2, y_tip - hub_len),
                           (hub_r, y_tip - hub_len), (hub_r, y_tip), (bs.hubcap_r_mm, y_tip),
                           (bs.hubcap_r_mm, y_out), (0.0, y_out)], x_axle_mm, z_axle_mm)
+    if mode_misfit:
+        st["mode_misfit_note"] = mode_misfit
     return {"support": part, "hubcap": cap, "_section_centre_mm": (xc, zc), "_struct": st, "_bs": bs_sized,
-            "_pod": pod, "_floor_high": floor_high}
+            "_pod": pod, "_floor_high": floor_high,
+            "support_mode": "rod" if floor_high else ("pod_strip" if pod and bs.strip else ("pod_plate" if pod else "bare"))}
 
 
 def gates(bs: BeamSupport, meshes: dict, x_axle_mm: float, z_axle_mm: float, R_mm: float,
@@ -529,6 +546,8 @@ def gates(bs: BeamSupport, meshes: dict, x_axle_mm: float, z_axle_mm: float, R_m
          # loads: margins in MPa and mm
          f"load_{tag}_stub_stress": st["allow_mpa"] - st["stress_mpa"],
          f"load_{tag}_bearing_sag": SAG_MAX_MM - st["sag_mm"]}
+    if "mode_misfit_note" in st:           # the held design no longer fits: refused, named
+        g[f"fit_{tag}_held_support_design"] = -1.0
     if "floor_embed_mm" in st:
         g[f"fit_{tag}_floor_rod_embed"] = st["floor_embed_mm"] - FLOOR_EMBED_MM
         g[f"load_{tag}_floor_rod_stress"] = st["allow_mpa"] - st["floor_rod_stress_mpa"]

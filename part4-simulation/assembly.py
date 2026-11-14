@@ -126,7 +126,7 @@ def build(W_mm: float, x_front_mm: float, d_halo_mm: float, body_half_stl: str,
           out_dir: str, wheel_design="team_stl",
           front: wg.FrontWing = wg.FrontWing(), rear: wg.RearWing = wg.RearWing(),
           rotate_wheels: bool = True, nose: "ns.NoseCone | None" = None,
-          support: "bsm.BeamSupport | None" = None) -> dict:
+          support: "bsm.BeamSupport | None" = None, support_modes: dict | None = None) -> dict:
     """support: None = the team's v2 CAD supports (reference), or a BeamSupport."""
     import trimesh
     import hardware_geometry as hg
@@ -173,7 +173,9 @@ def build(W_mm: float, x_front_mm: float, d_halo_mm: float, body_half_stl: str,
             # the pod's channel comes from THIS body at this axle, so the
             # support follows the body through the search and the sizing
             ch = bsm.pod_channel(support, body, x, R - SINK_MM, R) if support.pod else {}
-            bm = bsm.build(support, x, R - SINK_MM, y_in, w, disc, hub_mm=hub, R_mm=R, channel=ch)
+            bm = bsm.build(support, x, R - SINK_MM, y_in, w, disc, hub_mm=hub, R_mm=R, channel=ch,
+                           mode=(support_modes or {}).get(tag))
+            info.setdefault("support_mode", {})[tag] = bm["support_mode"]
             gates.update(bsm.gates(support, bm, x, R - SINK_MM, R, tag))
             if bm["_pod"]:
                 info.setdefault("pod", {})[tag] = ch
