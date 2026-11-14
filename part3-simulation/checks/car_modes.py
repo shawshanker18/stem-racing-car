@@ -24,7 +24,7 @@ reported the same way for information.
     python car_modes.py run   <ref_dir|-> <out> <items...>  items: base | m<k>+ | m<k>- | c<j>
     python car_modes.py judge <dir with results>
 (run/plan from part5-simulation; GitHub only: p3_car_modes.yml.)
-Env: P3_NMODES 60, P3_MODE_R_MM 10, P3_MODE_A_MM 1, P3_NCUTS 40, P3_CUT_DEPTHS "1 1.5",
+Env: P3_NMODES 96, P3_MODE_R_MM 10, P3_MODE_A_MM 1, P3_NCUTS 40, P3_CUT_DEPTHS "1 1.5",
 P3_SKIN_MM 3.95, P3_CFD_ITERS 1000, P3_SIGMA_MS 0.36, P3_CHUNK 8.
 """
 from __future__ import annotations
@@ -39,7 +39,7 @@ from pathlib import Path
 import numpy as np
 
 LAYOUT = {"W": 120.3, "x_front": 46.0, "d_halo": 43.72}      # run_car's defaults, as Part 2's cut study
-NMODES = int(os.environ.get("P3_NMODES", "60"))
+NMODES = int(os.environ.get("P3_NMODES", "96"))   # 96 put every half-body point within one 10 mm radius (p3_coverage 43612698200)
 R_M = float(os.environ.get("P3_MODE_R_MM", "10")) / 1e3
 A_M = float(os.environ.get("P3_MODE_A_MM", "1")) / 1e3
 NCUTS = int(os.environ.get("P3_NCUTS", "40"))
