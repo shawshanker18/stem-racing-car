@@ -286,7 +286,9 @@ def pod_joint(part, body_half, channels: dict, keep_out=None) -> Joint | None:
         if keep_out is not None:
             one = _bool("difference", [one, keep_out])
         lump = body_full ^ man(one)
-        cavity = lump.minkowski_difference(m3.Manifold.sphere(ch["wall_mm"] * 1e-3, 12))
+        # a polyhedral ball lies inside the true one: scaled so its faces reach the wall, or the
+        # wall comes out thinner than asked (0.55-0.69 measured against 0.7, car 44719/0)
+        cavity = lump.minkowski_difference(m3.Manifold.sphere(ch["wall_mm"] * 1e-3 / math.cos(math.pi / 24) ** 2, 24))
         if cavity.is_empty():
             shells.append(lump)
             continue
@@ -645,10 +647,14 @@ def nose_shell(cone_half, wall_mm: float, x_ref_a_mm: float):
         # With no ballast that is mass with no aero cost (the alternative is
         # a fatter body), and it needs no powder drain.
         return _bool("intersection", [outer, ahead]), None
-    inner = outer.copy()
-    inner.apply_translation([-x_root, 0.0, -zc])
-    inner.apply_scale([(L - w) / L, (b0 - w) / b0, (h0 - w) / h0])
-    inner.apply_translation([x_root, 0.0, zc])
+    # A true offset of the outside by the wall (a scaled copy left the wall at 0.55 mm
+    # where the cone narrows, against 0.8 asked: car 44719/0). The polyhedral ball is
+    # scaled so its faces reach the wall.
+    import manifold3d as m3
+    o = m3.Manifold(m3.Mesh(vert_properties=np.asarray(outer.vertices, np.float32),
+                            tri_verts=np.asarray(outer.faces, np.uint32)))
+    c = o.minkowski_difference(m3.Manifold.sphere(w / math.cos(math.pi / 24) ** 2, 24)).to_mesh()
+    inner = trimesh.Trimesh(np.asarray(c.vert_properties)[:, :3], np.asarray(c.tri_verts), process=False)
     cavity = _bool("intersection", [inner, trimesh.creation.box(
         bounds=[[-1.0, -0.2, -0.01], [xa - w, 0.2, 0.2]])])
     drain = trimesh.creation.cylinder(radius=1.5e-3, height=0.02, sections=24)

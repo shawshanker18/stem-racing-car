@@ -137,6 +137,23 @@ def section(bs: BeamSupport, n: int = 64) -> np.ndarray:
     return np.c_[a * np.sign(c) * np.abs(c) ** (2 / bs.p), b * np.sign(s) * np.abs(s) ** (2 / bs.p)]
 
 
+def printable_section(bs: BeamSupport, n: int = 64) -> np.ndarray:
+    """The section with no edge thinner than the print minimum: a superellipse tapers to
+    nothing at its sides (the referee measured 0.05-0.15 mm at the strip's and plate's
+    edges, car 44719/0), so it is cut flat where it is still PRINT_MIN_MM thick. A section
+    under that thickness everywhere becomes a rectangle of the print minimum. For the pod's
+    members, which nothing mills round (a bare beam's slot needs section() unchanged)."""
+    from shapely.geometry import Polygon, box
+    a, b, t = bs.beam_w_mm / 2, bs.beam_h_mm / 2, PRINT_MIN_MM
+    if bs.round_r_mm > 0:
+        return section(bs, n)
+    if 2 * b <= t:
+        return np.asarray(box(-a, -t / 2, a, t / 2).exterior.coords)[:-1]
+    xc = a * (1 - (t / (2 * b)) ** bs.p) ** (1 / bs.p)      # where the thickness is t
+    cut = Polygon(section(bs, 4 * n)).intersection(box(-xc, -b - 1, xc, b + 1))
+    return np.asarray(cut.exterior.coords)[:-1]
+
+
 def min_curvature_radius_mm(bs: BeamSupport) -> float:
     """Smallest radius of curvature of the section -- the slot's tightest
     corner, which the ball-end must fit."""
@@ -320,7 +337,7 @@ def claw_neck(bs: BeamSupport, dx_mm: float, dz_mm: float, rk_mm: float):
     from shapely.geometry import Point, Polygon, box
     a = bs.beam_w_mm / 2
     web = box(dx_mm - a, min(0.0, dz_mm), dx_mm + a, max(0.0, dz_mm))
-    sec = Polygon(section(bs)).buffer(0)
+    sec = Polygon(printable_section(bs)).buffer(0)
     sec = Polygon(np.asarray(sec.exterior.coords) + [dx_mm, dz_mm])
     neck = sec.union(web).intersection(Point(0, 0).buffer(rk_mm, quad_segs=64))
     return neck, np.asarray(web.exterior.coords)[:-1]
@@ -450,7 +467,7 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
     prof += line + [(0.0, y_tip)]
     # with a pod the plate stops a lap inside it: the pod's roof carries on
     y_plate0 = max(0.0, channel["y_body_at_plate_mm"] - bs.plate_lap_mm) if pod else 0.0
-    plate = _extrude_xz(section(bs_sized), y_plate0, y_beam_end + 0.05, xc, zc)
+    plate = _extrude_xz(printable_section(bs_sized), y_plate0, y_beam_end + 0.05, xc, zc)
     # T7.13: the claw hooks the wheel's inner corner (CLAW_LIP_MM in from the inner
     # face, over the outer CLAW_LIP_MM of radius). Inside that band the plate keeps
     # within R - lip of the axle, so a pod-high plate steps down to the disc there.
@@ -464,7 +481,7 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
         st["claw_neck_stress_mpa"] = M / neck_section_modulus_mm3(neck)
         keep = _revolve_y([(0.0, y_claw - 0.1), (rk, y_claw - 0.1), (rk, y_beam_end + 1.0), (0.0, y_beam_end + 1.0)],
                           x_axle_mm, z_axle_mm)
-        inboard = _extrude_xz(section(bs_sized), y_plate0, y_claw, xc, zc)
+        inboard = _extrude_xz(printable_section(bs_sized), y_plate0, y_claw, xc, zc)
         body = plate
         dz = zc - z_axle_mm
         if abs(dz) > 0.05:       # a plate at the axle's level needs no web (and has none to extrude)
@@ -478,7 +495,7 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
         plate = trimesh.boolean.union([inboard, outboard], engine="manifold")
     parts = [plate, _revolve_y(prof, x_axle_mm, z_axle_mm)]
     if pod and bs.strip and st["strip_fit_mm"] >= 0:
-        parts.append(_extrude_xz(section(dataclasses.replace(bs, beam_w_mm=bs.strip_w_mm,
+        parts.append(_extrude_xz(printable_section(dataclasses.replace(bs, beam_w_mm=bs.strip_w_mm,
                                                              beam_h_mm=bs.strip_h_mm)),
                                  0.0, y_beam_end + 0.05, x_axle_mm, z_strip))
     part = trimesh.boolean.union(parts, engine="manifold")
