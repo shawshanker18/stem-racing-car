@@ -124,7 +124,7 @@ def build_front_wing(fw: FrontWing, x_front_mm: float, R_mm: float,
     With the body, the mount runs aft until its whole end face is 1 mm inside
     it: a carved-back nose left the default mount 0.62 mm short (2026-09-26).
     """
-    sec = naca4(fw.chord_mm, fw.t_frac, fw.camber, te_mm=cc.MIN_WALL_MM)
+    sec = naca4(fw.chord_mm, fw.t_frac, fw.camber, te_mm=cc.BUILD_WALL_MM)
     x_le = fw.x_le(x_front_mm, R_mm)
     out = {"wing": extrude_section(sec, 0.0, fw.half_span_mm, x_le, fw.z_chord_mm, fw.aoa_deg)}
     ref_a = cc.ref_plane_A(x_front_mm)
@@ -133,7 +133,7 @@ def build_front_wing(fw: FrontWing, x_front_mm: float, R_mm: float,
         import trimesh
         t2 = fw.flap_chord_mm * fw.flap_t_frac
         z_te = fw.z_chord_mm + 0.75 * fw.chord_mm * math.sin(math.radians(fw.aoa_deg))
-        flap = extrude_section(naca4(fw.flap_chord_mm, fw.flap_t_frac, te_mm=cc.MIN_WALL_MM), 0.0, fw.half_span_mm,
+        flap = extrude_section(naca4(fw.flap_chord_mm, fw.flap_t_frac, te_mm=cc.BUILD_WALL_MM), 0.0, fw.half_span_mm,
                                x_le + fw.chord_mm - fw.flap_overlap_mm,
                                z_te + t / 2 + fw.flap_gap_mm + t2 / 2, fw.flap_aoa_deg)
         out["wing"] = trimesh.util.concatenate([out["wing"], flap])
@@ -194,7 +194,7 @@ def front_wing_gates(fw: FrontWing, meshes: dict, x_front_mm: float, R_mm: float
     b = wing.bounds * 1e3
     ref_a = cc.ref_plane_A(x_front_mm)
     allb = np.vstack([m.bounds for m in meshes.values()]) * 1e3
-    t = fw.chord_mm * fw.t_frac + 0.3 * cc.MIN_WALL_MM     # the blunt TE adds ~0.3 te at the thickest point
+    t = fw.chord_mm * fw.t_frac + 0.3 * cc.BUILD_WALL_MM     # the blunt TE adds ~0.3 te at the thickest point
     # Span: continuous across the centreline unless a nose wider than the
     # mount splits it; then two segments of (half_span - nose_half_width).
     seg = fw.half_span_mm - max(nose_half_width_mm, fw.mount_t_mm / 2)
@@ -221,7 +221,7 @@ def front_wing_gates(fw: FrontWing, meshes: dict, x_front_mm: float, R_mm: float
         "T8.5.1_mount_half_width": cc.NOSE_SUPPORT_HALF_WIDTH_MAX - meshes["mount"].bounds[1, 1] * 1e3,
     }
     if fw.flap_chord_mm > 0:
-        g["T8.6.3_flap_thick_min"] = fw.flap_chord_mm * fw.flap_t_frac + 0.3 * cc.MIN_WALL_MM - cc.WING_THICK_MIN
+        g["T8.6.3_flap_thick_min"] = fw.flap_chord_mm * fw.flap_t_frac + 0.3 * cc.BUILD_WALL_MM - cc.WING_THICK_MIN
     if endplate is not None:
         eb = endplate.bounds * 1e3
         g["T8.5.3_endplate_width"] = cc.FRONT_ENDPLATE_WIDTH_MAX - (eb[1, 1] - eb[0, 1])
@@ -289,7 +289,7 @@ def build_rear_wing(rw: RearWing, x_front_mm: float, W_mm: float, body_half_mesh
     t = rw.chord_mm * rw.t_frac
     top = body_top_under(body_half_mesh, x_le - 1, x_le + rw.chord_mm + 1, rw.half_span_mm + 1)
     z_chord = top + cc.CLEAR_AIR + rw.clear_air_margin_mm + t / 2 + 0.5
-    sec = naca4(rw.chord_mm, rw.t_frac, rw.camber, te_mm=cc.MIN_WALL_MM)
+    sec = naca4(rw.chord_mm, rw.t_frac, rw.camber, te_mm=cc.BUILD_WALL_MM)
     wing = extrude_section(sec, 0.0, rw.half_span_mm, x_le, z_chord, rw.aoa_deg)
     lift = _front_view_top(wing, forward_parts) + 0.1 - wing.bounds[0, 2] * 1e3
     if lift > 0:
@@ -316,7 +316,7 @@ def rear_wing_gates(rw: RearWing, meshes: dict, x_front_mm: float, W_mm: float,
     wing = meshes["wing"]
     b = wing.bounds * 1e3
     ref_b = cc.ref_plane_B(x_front_mm, W_mm)
-    t = rw.chord_mm * rw.t_frac + 0.3 * cc.MIN_WALL_MM     # the blunt TE adds ~0.3 te at the thickest point
+    t = rw.chord_mm * rw.t_frac + 0.3 * cc.BUILD_WALL_MM     # the blunt TE adds ~0.3 te at the thickest point
     # T9.6 clear air: sample the wing's lower surface, distance to the body.
     pts, _ = __import__("trimesh").sample.sample_surface_even(wing, 800, seed=1)
     lower = pts[pts[:, 2] < wing.bounds[:, 2].mean()]

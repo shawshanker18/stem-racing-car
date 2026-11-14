@@ -77,7 +77,7 @@ CLAW_LIP_MM = 1.5            # T7.13 hang-test claw lip (regulation figure, p.34
 # Loads and limits (see the module docstring)
 LOAD_RADIAL_N = 3.0
 LOAD_AXIAL_N = 1.2
-PRINT_MIN_MM = cc.MIN_WALL_MM   # thinnest wall the printer makes reliably (component_contract)
+PRINT_MIN_MM = cc.BUILD_WALL_MM   # the printer's minimum plus the build margin (component_contract)
 ABS_STRENGTH_MPA = 40.0      # generic ABS datasheet tensile strength; a print can be weaker (team to confirm)
 ABS_E_MPA = 2000.0           # generic ABS datasheet modulus (2.0-2.3 GPa); the lower end
 SAFETY = 2.0

@@ -35,7 +35,7 @@ class NoseCone:
     tip_z_mm: float = 10.0        # tip height above the track
     blend_after_ref_a_mm: float = 10.0   # root station, where the body is full size
     root_scale: float = 0.97      # root section vs the body's own
-    wall_mm: float = max(0.8, cc.MIN_WALL_MM)   # printed shell, for mass; never under the print minimum
+    wall_mm: float = max(0.8, cc.BUILD_WALL_MM)   # printed shell, for mass; never under the print minimum
     material: str = "ABS"         # the team prints ABS (team, 2026-11-14; run_car passes the same)
 
 

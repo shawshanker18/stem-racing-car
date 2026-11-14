@@ -53,7 +53,7 @@ def test_rod_embed_just_inside_and_just_outside_the_ceiling():
     for floor, ok in ((CEILING - 0.05, True), (CEILING + 0.05, False)):
         out, g = _build(floor)
         _common(out, g)
-        assert (g["fit_rear_floor_rod_embed"] >= 0) is ok, floor
+        assert (g["fit_rear_floor_rod_embed"] >= -1e-6) is ok, floor     # the gate's own pass rule (_entry)
 
 
 def _switch_floor():

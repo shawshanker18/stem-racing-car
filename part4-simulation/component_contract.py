@@ -74,3 +74,8 @@ def ref_plane_B(x_front_mm: float, W_mm: float) -> float:
 # environment variable P4_MIN_WALL_MM overrides it, for checking other values.
 import os as _os
 MIN_WALL_MM = float(_os.environ.get("P4_MIN_WALL_MM", "1.0"))   # the team's printer (2026-11-14)
+# Every printed wall is BUILT this much over the minimum: a faceted surface (a revolved disc,
+# a hollowed pod, a NACA edge) dips a few hundredths under its nominal (0.978-0.998 mm
+# measured at 1.0, car 44719/0). The referee still judges the minimum itself.
+WALL_BUILD_MARGIN_MM = 0.05
+BUILD_WALL_MM = MIN_WALL_MM + WALL_BUILD_MARGIN_MM
