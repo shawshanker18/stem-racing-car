@@ -105,6 +105,17 @@ def manufactured_mass_kg(asm) -> float:
             + asm.get("ballast_g", 0.0)) * 1e-3 + asm["fixed_hardware_kwargs"]["halo_mass_kg"]
 
 
+MASS_TOL_KG = 5e-5            # the car as manufactured: 48.2 +- 0.05 g (BUILD_SPEC 12.4)
+
+
+def mass_refusal(err_kg: float, fixed_skin: bool) -> str | None:
+    """Why a sized car is refused on its mass, or None. A fixed-skin build (gradient checks,
+    stress cars) is not sized, so it is never refused here; the referee still weighs it."""
+    if fixed_skin or abs(err_kg) <= MASS_TOL_KG:
+        return None
+    return f"mass_not_converged: car {err_kg * 1e3:+.3f} g from the target (tolerance 0.05 g)"
+
+
 def build_car(a, out: Path, **p4kw):
     """Body and parts until the car AS MANUFACTURED weighs the target (48.2 +- 0.05 g).
 
@@ -140,7 +151,7 @@ def build_car(a, out: Path, **p4kw):
         pts.append((body, err))
         if best is None or abs(err) < abs(best[1]):
             best = (body, err, pass_)
-        if getattr(a, "skin_mm", None) is not None or abs(err) < 5e-5:
+        if getattr(a, "skin_mm", None) is not None or abs(err) <= MASS_TOL_KG:
             break                                  # fixed skin: nothing to iterate
         lo = max((p for p in pts if p[1] < 0), key=lambda p: p[0], default=None)
         hi = min((p for p in pts if p[1] > 0), key=lambda p: p[0], default=None)
@@ -160,7 +171,7 @@ def build_car(a, out: Path, **p4kw):
     info["build_passes"] = pass_
     info["body_targets_g"] = [p[0] * 1e3 for p in pts]
     info["car_mass_error_g"] = err * 1e3
-    info["mass_converged"] = abs(err) < 5e-5
+    info["mass_converged"] = abs(err) <= MASS_TOL_KG
     if not info["mass_converged"]:
         log(f"  MASS NOT CONVERGED: car {(T + err)*1e3:.3f} g, {err*1e3:+.3f} g from the target")
     return geom, info, asm
@@ -420,6 +431,13 @@ def main(argv=None):
         a.ballast_g = need
         asm["ballast_g"] = need
         log(f"  short layout: {need:.2f} g of ballast in the container under the halo")
+    # Refuse a car that did not size (MINI DON, 2026-11-15): no CFD, named in summary.json.
+    import ballast as _bt
+    why = mass_refusal(manufactured_mass_kg(asm) - _bt.target_competition_kg(), getattr(a, "skin_mm", None) is not None)
+    if why:
+        S["refused"] = {"reason": why, "car_mass_g": manufactured_mass_kg(asm) * 1e3, "body": S["body"].get("body_targets_g")}
+        (out / "summary.json").write_text(json.dumps(S, indent=2, default=str))
+        raise SystemExit(f"car refused: {why}")
     S["wheels"] = asm["wheel_design"]
     S["parts_mass_g"] = asm["parts_mass_g"]
 
