@@ -67,3 +67,19 @@ def test_modes_and_steps_go_through_carve(monkeypatch, tmp_path):
         g, rep = carve.carve(cm.LAYOUT, [{"bumps": bumps, "unit": False}], spacing_mm=2.0)
         assert rep[0]["status"] == "ok"
         assert sha(cm.field(item)) == sha(g.phi.grid)
+
+
+def test_more_modes_keep_the_old_ones(monkeypatch):
+    """Raising NMODES 60 -> 96 appends centres: modes 0-59 are byte-identical before and after."""
+    import numpy as np
+    sys.path.insert(0, str(ROOT / "part1-simulation"))
+    monkeypatch.setenv("P3_SPACING_MM", "2.0")
+    monkeypatch.setenv("P3_NMODES", "60")
+    cm = _cm(monkeypatch, "fine", False)
+    _, V, N = cm.surface(cm.block())
+    c60 = cm.centres(V, N)
+    monkeypatch.setenv("P3_NMODES", "96")
+    cm = _cm(monkeypatch, "fine", False)
+    c96 = cm.centres(V, N)
+    assert c60.shape == (60, 3) and c96.shape == (96, 3)
+    assert np.ascontiguousarray(c96[:60]).tobytes() == np.ascontiguousarray(c60).tobytes()
