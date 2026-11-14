@@ -65,21 +65,21 @@ import numpy as np
 
 import component_contract as cc
 
-PA12_G_CM3 = 1.01
-TOOL_R_MM = 3.125
+ABS_G_CM3 = 1.04             # the team prints ABS (team, 2026-11-14); generic ABS datasheet 1.04 g/cm3
+TOOL_R_MM = 3.175              # the team's smallest machined radius (team, 2026-11-14)
 STUB_D_MM = 3.0               # the journal: the 3x6x2.5 bearing's bore
 BEARING_W_MM = 2.5
 RIM_INNER_R_MM = 13.72        # the team wheel's rim, inside (measured on the STL)
 FLOOR_EMBED_MM = 3.0          # a floor-high rod's top this far into the foam: a glue pocket
-#                               the 3.125 mm ball can mill (support-design choice, not a rule)
+#                               the 3.175 mm ball can mill (support-design choice, not a rule)
 CLAW_LIP_MM = 1.5            # T7.13 hang-test claw lip (regulation figure, p.34; legality.py)
 
 # Loads and limits (see the module docstring)
 LOAD_RADIAL_N = 3.0
 LOAD_AXIAL_N = 1.2
 PRINT_MIN_MM = cc.MIN_WALL_MM   # thinnest wall the printer makes reliably (component_contract)
-PA12_STRENGTH_MPA = 44.0
-PA12_E_MPA = 1650.0
+ABS_STRENGTH_MPA = 40.0      # generic ABS datasheet tensile strength; a print can be weaker (team to confirm)
+ABS_E_MPA = 2000.0           # generic ABS datasheet modulus (2.0-2.3 GPa); the lower end
 SAFETY = 2.0
 SAG_MAX_MM = 0.15
 
@@ -120,7 +120,7 @@ class BeamSupport:
     hubcap: bool = True
     hubcap_r_mm: float = 12.0      # as the disc: 1.5 mm off the track (T3.7)
     hubcap_t_mm: float = PRINT_MIN_MM
-    material_g_cm3: float = PA12_G_CM3
+    material_g_cm3: float = ABS_G_CM3
 
 
 def section(bs: BeamSupport, n: int = 64) -> np.ndarray:
@@ -221,10 +221,10 @@ def structure(bs: BeamSupport, outline: list, y_bearing_mm: float, y_fixed_mm: f
     d = 2 * np.array([r_of(y) for y in ys])
     sigma = 32 * M / (math.pi * d ** 3)
     # sag: integrate the curvature M / EI twice from the fixed end
-    k = M / (PA12_E_MPA * math.pi * d ** 4 / 64)
+    k = M / (ABS_E_MPA * math.pi * d ** 4 / 64)
     slope = np.concatenate([[0.0], np.cumsum(0.5 * (k[1:] + k[:-1]) * np.diff(ys))])
     sag = float(np.sum(0.5 * (slope[1:] + slope[:-1]) * np.diff(ys)))
-    return {"stress_mpa": float(sigma.max()), "allow_mpa": PA12_STRENGTH_MPA / SAFETY,
+    return {"stress_mpa": float(sigma.max()), "allow_mpa": ABS_STRENGTH_MPA / SAFETY,
             "stress_at_y_mm": float(ys[int(sigma.argmax())]), "sag_mm": sag,
             "journal_stress_mpa": float(32 * LOAD_AXIAL_N * R_mm / (math.pi * STUB_D_MM ** 3))}
 
@@ -235,14 +235,14 @@ def sized_disc_t_mm(bs: BeamSupport, y_disc_mm: float, y_bearing_mm: float, R_mm
     strip of disc as wide as the member it feeds, bending out of its plane."""
     M = LOAD_RADIAL_N * (y_bearing_mm - y_disc_mm) + LOAD_AXIAL_N * R_mm
     w = min(bs.beam_w_mm, bs.strip_w_mm) if bs.strip else bs.beam_w_mm
-    return max(bs.disc_t_mm, PRINT_MIN_MM, math.sqrt(6 * (M / 2) / (w * PA12_STRENGTH_MPA / SAFETY)))
+    return max(bs.disc_t_mm, PRINT_MIN_MM, math.sqrt(6 * (M / 2) / (w * ABS_STRENGTH_MPA / SAFETY)))
 
 
 def sized_root_d_mm(bs: BeamSupport, y_disc_mm: float, y_bearing_mm: float, R_mm: float) -> float:
     """The boss diameter at the disc: the larger of the asked boss_d and what
     the root's bending moment needs at the allowed stress."""
     M = LOAD_RADIAL_N * (y_bearing_mm - y_disc_mm) + LOAD_AXIAL_N * R_mm
-    need = (32 * M / (math.pi * PA12_STRENGTH_MPA / SAFETY)) ** (1 / 3)
+    need = (32 * M / (math.pi * ABS_STRENGTH_MPA / SAFETY)) ** (1 / 3)
     return max(bs.boss_d_mm, need, bs.shoulder_d_mm)
 
 
@@ -275,7 +275,7 @@ def frame(bs: BeamSupport, plate_h_mm: float, span_mm: float, reach_mm: float, a
     I1, A1 = k * bs.beam_w_mm * plate_h_mm ** 3, a * bs.beam_w_mm * plate_h_mm
     M_tip = LOAD_RADIAL_N * reach_mm + LOAD_AXIAL_N * R_mm        # at the disc
     M_root = M_tip + LOAD_RADIAL_N * span_mm                      # at the body's side
-    E = PA12_E_MPA
+    E = ABS_E_MPA
     if bs.strip and arm_mm > 2.0:
         I2, A2 = k * bs.strip_w_mm * bs.strip_h_mm ** 3, a * bs.strip_w_mm * bs.strip_h_mm
         N = M_root / arm_mm

@@ -148,7 +148,7 @@ def part4_kwargs(a) -> dict:
     # The body ends at Ref A; the nose cone is a printed SLS PA12 shell (team
     # spec 2026-09-27) whose root takes the body's section 1 mm aft of Ref A.
     import nose as ns
-    nk = dict(blend_after_ref_a_mm=1.0, root_scale=1.0, material="PA12", wall_mm=0.8)
+    nk = dict(blend_after_ref_a_mm=1.0, root_scale=1.0, material="ABS", wall_mm=1.0)
     if getattr(a, "nose_json", None):
         nk.update(json.loads(a.nose_json))
     kw = {"support": sup, "nose": ns.NoseCone(**nk)}

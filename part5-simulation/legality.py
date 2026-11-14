@@ -95,9 +95,9 @@ CARTRIDGE_LENGTH_MIN_MM = rc.CARTRIDGE_LENGTH_MIN_MM
 MESH_MAX_EDGE_MM = 8.0             # measured 1.9-7.6 after the remesh, 106 before it
 MESH_MAX_SLIVER_BODY_PCT = 4.0     # measured 0.4-3.2 % after (highest at 0.3 mm), 3.3 % before
 MESH_MAX_SLIVER_PRINTED_PCT = 12.0 # 5.7-11 % after, 25 % before: a wing's sharp trailing edge
-PRINTED_MIN_WALL_MM = 0.7         # the print minimum (Part 4 component_contract.MIN_WALL_MM; typed here, the
+PRINTED_MIN_WALL_MM = 1.0         # the print minimum (Part 4 component_contract.MIN_WALL_MM; typed here, the
 #                                  referee imports nothing from the builders). Team printer figure to come.
-WALL_MEASURE_TOL_MM = 0.02        # the files are 32-bit STL and boolean output: 20 um of round-off
+WALL_MEASURE_TOL_MM = 0.0         # no tolerance (reviewer, 2026-11-14): walls are built at or above the minimum
 
 
 def _contains(mesh, pts, chunk: int = 300):
@@ -1190,7 +1190,7 @@ def check(body_half_stl: str, assembly: dict, mass_state: dict | None = None,
             ("milled half not watertight before the fuse" if not j["machined_body_watertight"]
              else f"{len(j.get('manufactured', {}))} files"))
     for k, m in assembly.get("gates", {}).items():
-        r[f"P4.{k}"] = _entry(m, (f"bare beam (no pod fits at this axle): tightest slot corner {m:+.3f} mm against the {3.125} mm ball"
+        r[f"P4.{k}"] = _entry(m, (f"bare beam (no pod fits at this axle): tightest slot corner {m:+.3f} mm against the {3.175} mm ball"
                                   if k.endswith("slot_corner_radius") else f"margin {m:+.3f}"))
     return r
 
