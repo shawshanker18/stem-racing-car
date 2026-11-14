@@ -70,16 +70,21 @@ def test_modes_and_steps_go_through_carve(monkeypatch, tmp_path):
 
 
 def test_more_modes_keep_the_old_ones(monkeypatch):
-    """Raising NMODES 60 -> 96 appends centres: modes 0-59 are byte-identical before and after."""
+    """Raising NMODES 60 -> 96 appends centres: modes 0-59 are byte-identical before and after,
+    on the plain block and on a body carved through carve.carve."""
     import numpy as np
     sys.path.insert(0, str(ROOT / "part1-simulation"))
     monkeypatch.setenv("P3_SPACING_MM", "2.0")
-    monkeypatch.setenv("P3_NMODES", "60")
     cm = _cm(monkeypatch, "fine", False)
-    _, V, N = cm.surface(cm.block())
-    c60 = cm.centres(V, N)
-    monkeypatch.setenv("P3_NMODES", "96")
-    cm = _cm(monkeypatch, "fine", False)
-    c96 = cm.centres(V, N)
-    assert c60.shape == (60, 3) and c96.shape == (96, 3)
-    assert np.ascontiguousarray(c96[:60]).tobytes() == np.ascontiguousarray(c60).tobytes()
+    import carve
+    carved, rep = carve.carve(cm.LAYOUT, [{"bias_mm": -0.5, "bumps": [{"u": [0.4, 0.8, 0.6], "amp_mm": 2.0,
+                                                                       "sigma_mm": 10.0}]}], spacing_mm=2.0)
+    assert rep[0]["status"] == "ok"
+    for g in (cm.block(), carved):
+        _, V, N = cm.surface(g)
+        out = {}
+        for n in (60, 96):
+            monkeypatch.setenv("P3_NMODES", str(n))
+            out[n] = _cm(monkeypatch, "fine", False).centres(V, N)
+        assert out[60].shape == (60, 3) and out[96].shape == (96, 3)
+        assert np.ascontiguousarray(out[96][:60]).tobytes() == np.ascontiguousarray(out[60]).tobytes()
