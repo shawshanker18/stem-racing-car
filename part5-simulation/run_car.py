@@ -106,36 +106,63 @@ def manufactured_mass_kg(asm) -> float:
 
 
 def build_car(a, out: Path, **p4kw):
-    """Body and parts to a fixed point: the body is sized so the car AS
-    MANUFACTURED weighs the target, but the joints (pockets and plugs) and so
-    the parts' masses depend on the body."""
+    """Body and parts until the car AS MANUFACTURED weighs the target (48.2 +- 0.05 g).
+
+    The parts' masses depend on the body (joints, pockets, and the support's design), so
+    the body target is searched on the true manufactured mass: each pass builds the body,
+    the parts and the joints and weighs the whole car. The next body mass is a secant
+    between passes on either side of the target (bisection if the secant leaves the
+    bracket), else a 1:1 step. The old damped fixed point oscillated when the support's
+    design flipped with a tiny body change (+0.5 <-> +3.5 g) and judged a body built at a
+    stale target after 6 passes (50.53 / 48.10 / 47.42 g, Part 4 43612741618, 2026-11-14).
+    The car judged is always one built at its own final target; if no pass is within
+    0.05 g, info["mass_converged"] is False and the error is named (never passed quietly)."""
     import ballast
     import unified_phi as up
-    target = None
-    targets = []
-    for pass_ in range(1, 7):
-        prev = target
+    T = ballast.target_competition_kg()
+    pts, best, t = [], None, None             # pts: (body kg built, car error kg)
+
+    def run(target, pass_):
         a._body_target_kg = target
         geom, info = build_body(a, out)
         info.update(export_body(geom, out / "body_half.stl"))
         asm = parts_and_joints(a, out, geom, out / "body_half.stl", "parts", **p4kw)
-        # ask the body for the shortfall on top of what it weighs now
-        new = (sum(c.mass_kg for c in up.compute_mass_com(geom))
-               + ballast.target_competition_kg() - manufactured_mass_kg(asm))
-        # damped: the keel under a support beam grows as the body grows, so an
-        # undamped fixed point overshoots and oscillates (1.6 g off, 2026-09-27)
-        target = new if prev is None else 0.5 * (prev + new)
-        targets.append(new * 1e3)
-        log(f"  pass {pass_}: body target {new*1e3:.2f} g; joints "
+        body = sum(c.mass_kg for c in up.compute_mass_com(geom))
+        err = manufactured_mass_kg(asm) - T
+        log(f"  pass {pass_}: body {body*1e3:.3f} g, car {(T + err)*1e3:.3f} g ({err*1e3:+.3f}); joints "
             + ", ".join(f"{k} {v*1e3:+.2f}" for k, v in asm["joints"]["mass_delta_kg"].items())
             + f"; supports each {[round(x, 2) for x in asm['info'].get('support_mass_g_each', [])]}")
-        if getattr(a, "skin_mm", None) is not None:
+        return geom, info, asm, body, err
+
+    pass_ = 0
+    for pass_ in range(1, 9):
+        geom, info, asm, body, err = run(t, pass_)
+        pts.append((body, err))
+        if best is None or abs(err) < abs(best[1]):
+            best = (body, err, pass_)
+        if getattr(a, "skin_mm", None) is not None or abs(err) < 5e-5:
             break                                  # fixed skin: nothing to iterate
-        if pass_ >= 2 and abs(new - prev) < 5e-5:
-            break
-    info["body_target_g"] = target * 1e3
+        lo = max((p for p in pts if p[1] < 0), key=lambda p: p[0], default=None)
+        hi = min((p for p in pts if p[1] > 0), key=lambda p: p[0], default=None)
+        if lo and hi:
+            if hi[0] - lo[0] < 1e-6:
+                break                              # a jump in the car's mass straddles the target
+            x = lo[0] - lo[1] * (hi[0] - lo[0]) / (hi[1] - lo[1])
+            if not lo[0] < x < hi[0]:
+                x = 0.5 * (lo[0] + hi[0])
+            t = x
+        else:
+            t = body - err                         # one gram of body is one gram of car
+    if best[2] != pass_:                           # the files on disk must be the judged car's
+        geom, info, asm, body, err = run(best[0], pass_ + 1)
+        pass_ += 1
+    info["body_target_g"] = body * 1e3
     info["build_passes"] = pass_
-    info["body_targets_g"] = targets
+    info["body_targets_g"] = [p[0] * 1e3 for p in pts]
+    info["car_mass_error_g"] = err * 1e3
+    info["mass_converged"] = abs(err) < 5e-5
+    if not info["mass_converged"]:
+        log(f"  MASS NOT CONVERGED: car {(T + err)*1e3:.3f} g, {err*1e3:+.3f} g from the target")
     return geom, info, asm
 
 
