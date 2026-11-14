@@ -159,6 +159,8 @@ def field(item: str) -> np.ndarray:
 
 def run_car(item: str, ref: str | None, out: Path) -> Path:
     o = out / item
+    if os.environ.get("P5_LOOP") == "1" and item != "base" and not ref:      # one frozen start state for every loop timing
+        raise SystemExit(f"loop timing {item} without the frozen start state (the base car's mesh and flow)")
     shutil.rmtree(o, ignore_errors=True)
     o.mkdir(parents=True)
     np.save(o / "field.npy", field(item))

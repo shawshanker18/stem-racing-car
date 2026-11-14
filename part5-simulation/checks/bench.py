@@ -78,7 +78,7 @@ def one_run(fname, sigma, kind, seed):
     def meas(x, _):
         calls[0] += 1
         return f(x) + rng.normal(0, sigma)
-    cl.run_local(state, oracle(kind, f, rng), step, meas, sigma)
+    cl.run_local(state, oracle(kind, f, rng), step, meas, sigma, 0.0)
     best = min(state["chains"], key=lambda c: f(c["x"]))
     ok = f(best["x"]) - fmin <= 2 * sigma
     # a wrong compass is handled when no chain walked uphill: each one either stopped flagged or
@@ -95,12 +95,34 @@ def false_keep(sigma, trials, seed=0):
     keeps = rounds = 0
     for t in range(trials):
         state = {"chains": [cl.new_chain(0, np.full(D, 0.5), 0.2)]}
-        cl.run_local(state, lambda x: np.eye(D)[0], step, lambda x, _: 1.0 + rng.normal(0, sigma), sigma)
+        cl.run_local(state, lambda x: np.eye(D)[0], step, lambda x, _: 1.0 + rng.normal(0, sigma), sigma, 0.0)
         for h in state["chains"][0]["history"]:
             rounds += 1
             keeps += h["kept"]
     return keeps / max(rounds, 1), rounds
 
+
+
+def false_keep_shape(shape, trials, repeat=1e-5, aware=True, seed=0):
+    """Flat function, a deterministic stopwatch: every shape carries its own fixed error (car-to-car
+    noise `shape`), and re-timing it adds only `repeat`. Every keep is false. aware=False is the old
+    rule (sigma from re-run pairs only); aware=True passes the measured shape noise to the keep rule."""
+    rng = np.random.default_rng(seed)
+    keeps = rounds = 0
+    for t in range(trials):
+        own = {}
+
+        def meas(x, _):
+            k = np.round(np.asarray(x, float), 12).tobytes()
+            if k not in own:
+                own[k] = rng.normal(0, shape)
+            return 1.0 + own[k] + rng.normal(0, repeat)
+        state = {"chains": [cl.new_chain(0, np.full(D, 0.5), 0.2)]}
+        cl.run_local(state, lambda x: np.eye(D)[0], step, meas, repeat, shape if aware else 0.0)
+        for h in state["chains"][0]["history"]:
+            rounds += 1
+            keeps += h["kept"]
+    return keeps / max(rounds, 1), rounds
 
 def trace(fname, sigma_ms, kind, n, show=6):
     """Per-round log of the chains that end outside 2 sigma (same seeds as the bench)."""
@@ -112,10 +134,10 @@ def trace(fname, sigma_ms, kind, n, show=6):
         f, fmin = functions(np.random.default_rng(seed))[fname]
         log = []
 
-        def adv(state, res, ps, f=f, fmin=fmin, log=log):
+        def adv(state, res, ps, ss=0.0, f=f, fmin=fmin, log=log):
             c = state["chains"][0]
             k = len(c["history"])
-            orig(state, res, ps)
+            orig(state, res, ps, ss)
             if len(c["history"]) > k:
                 h = c["history"][-1]
                 log.append((h["round"], h["scale"], h["best"], h["dT_search"] / sigma, h["gain_confirm"] / sigma,
@@ -166,7 +188,13 @@ def main(n, sigmas=(0.3, 1.0), fnames=("bowl", "valley", "peaks")):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "trace":
+    if len(sys.argv) > 1 and sys.argv[1] == "shape":                 # python bench.py shape 0.09 300
+        sh, nt = float(sys.argv[2]) * MS, int(sys.argv[3])
+        for aware in (False, True):
+            fk, r = false_keep_shape(sh, nt, aware=aware)
+            print(f"LAB shape noise {sh / MS:g} ms, deterministic re-runs, {'with' if aware else 'WITHOUT'} the shape term: "
+                  f"false-keep {fk:.2%} of {r} rounds (mark <= 5 %) {'PASS' if fk <= 0.05 else 'FAIL'}", flush=True)
+    elif len(sys.argv) > 1 and sys.argv[1] == "trace":
         trace(sys.argv[2], float(sys.argv[3]), sys.argv[4], int(sys.argv[5]) if len(sys.argv) > 5 else 30)
     else:
         main(int(sys.argv[1]) if len(sys.argv) > 1 else 200,

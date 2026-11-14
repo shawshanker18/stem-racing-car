@@ -26,7 +26,7 @@ def _farm(state, free, max_new):
         for k in running[:free // 2 or 1]:                 # half the running jobs finish each tick
             results[k] = _f(need[k][0]) if k in need else 0.0
         running = [k for k in running if k not in results]
-        cl.advance(state, results, 1e-4)
+        cl.advance(state, results, 1e-4, 0.0)
         ticks += 1
         assert ticks < 20000
     return state
@@ -54,3 +54,12 @@ def test_round_robin():
     cl.plan(s, lambda x: [1.0, 0, 0], lambda x, d, z: list(np.asarray(x) + z * np.asarray(d)))
     first = cl.to_start(s, {}, set(), 3)
     assert sorted(k.split("_")[1] for k in first) == ["c0", "c1", "c2"]
+
+
+def test_deterministic_stopwatch_false_keep():
+    """Re-runs repeat a shape's own error (Part 2: repeat 0.01 ms, car-to-car 0.09 ms). With the
+    measured shape noise in the keep rule, a flat function keeps <= 5 % of rounds."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "checks"))
+    import bench
+    fk, rounds = bench.false_keep_shape(0.09e-3, 150, repeat=1e-5, aware=True)
+    assert rounds > 100 and fk <= 0.05, (fk, rounds)

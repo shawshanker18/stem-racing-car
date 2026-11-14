@@ -136,7 +136,10 @@ def plan(state: dict, direction, step) -> None:
             c["cands"] = {str(f): step(c["x"], d / n, f * c["scale"] * length) for f in SIZES}
 
 
-def advance(state: dict, results: dict, prior_sigma: float) -> None:
+def advance(state: dict, results: dict, prior_sigma: float, shape_sigma: float) -> None:
+    """shape_sigma: Part 2's measured car-to-car noise on the loop's mesh (s). Re-timing one shape
+    repeats its own error, so it never averages away: the keep bar always carries 2 shape_sigma^2
+    (current car and candidate are two shapes), however many copies are timed."""
     """Use whatever results exist; move each chain on once its round's cases are all in."""
     need = needed(state)
     for c in state["chains"]:
@@ -166,8 +169,10 @@ def advance(state: dict, results: dict, prior_sigma: float) -> None:
         # Bonferroni over the k candidates AND the LOOKS confirm looks (2, 4, 8 runs)
         z = z_bonferroni(len(c["cands"]) * LOOKS)
         gain = T0 - sum(conf) / n
-        keep = gain > z * sig * (1 / len(cur) + 1 / n) ** 0.5
-        if not keep and gain > 0 and n < CONFIRM * 2 ** (LOOKS - 1):
+        bar = z * (sig ** 2 * (1 / len(cur) + 1 / n) + 2 * shape_sigma ** 2) ** 0.5
+        keep = gain > bar
+        copies_help = sig ** 2 * (1 / len(cur) + 1 / n) > 0.1 * 2 * shape_sigma ** 2   # more copies only cut repeat noise
+        if not keep and gain > 0 and copies_help and n < CONFIRM * 2 ** (LOOKS - 1):
             c["nconf"] = 2 * n                    # promising but not yet clear: time both more
             continue
         c["pairs"] += [(conf[i], conf[i + 1]) for i in range(0, n - 1, 2)]
@@ -175,7 +180,7 @@ def advance(state: dict, results: dict, prior_sigma: float) -> None:
         c["nconf"] = CONFIRM
         c["history"].append({"round": c["round"], "scale": c["scale"], "best": float(c["best"]),
                              "dT_search": c["dT"][c["best"]], "gain_confirm": gain, "sigma": sig,
-                             "z": z, "confirm_runs": n, "kept": keep})
+                             "z": z, "bar": bar, "confirm_runs": n, "kept": keep})
         if keep:
             c["x_prev"], c["g_prev"] = c["x"], c["g"]
             c["x"], c["times"] = c["cands"][c["best"]], list(conf)
@@ -216,7 +221,7 @@ def to_start(state: dict, results: dict, running: set, free: int) -> list:
     return out
 
 
-def run_local(state: dict, direction, step, measure, prior_sigma: float) -> dict:
+def run_local(state: dict, direction, step, measure, prior_sigma: float, shape_sigma: float) -> dict:
     """The whole loop with an immediate stopwatch (the fake bench); the farm does the same with
     needed/advance across GitHub jobs."""
     results = {}
@@ -224,5 +229,5 @@ def run_local(state: dict, direction, step, measure, prior_sigma: float) -> dict
         plan(state, direction, step)
         for k, (x, _) in needed(state).items():
             results[k] = measure(x, k)
-        advance(state, results, prior_sigma)
+        advance(state, results, prior_sigma, shape_sigma)
     return state
