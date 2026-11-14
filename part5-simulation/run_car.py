@@ -147,12 +147,16 @@ def build_car(a, out: Path, **p4kw):
     import unified_phi as up
     T = ballast.target_competition_kg()
     pts, best, t = [], None, None             # pts: (body kg built, car error kg)
+    modes = None
 
     def run(target, pass_):
         a._body_target_kg = target
         geom, info = build_body(a, out)
         info.update(export_body(geom, out / "body_half.stl"))
-        asm = parts_and_joints(a, out, geom, out / "body_half.stl", "parts", **p4kw)
+        # Pass 1 picks the support design; every later pass holds it (Part 4 f52a604), so the
+        # parts' mass cannot jump between designs as the body is resized.
+        asm = parts_and_joints(a, out, geom, out / "body_half.stl", "parts",
+                               **dict(p4kw, **({"support_modes": modes} if modes else {})))
         body = sum(c.mass_kg for c in up.compute_mass_com(geom))
         err = manufactured_mass_kg(asm) - T
         log(f"  pass {pass_}: body {body*1e3:.3f} g, car {(T + err)*1e3:.3f} g ({err*1e3:+.3f}); joints "
@@ -164,6 +168,8 @@ def build_car(a, out: Path, **p4kw):
     for pass_ in range(1, 9):
         geom, info, asm, body, err = run(t, pass_)
         pts.append((body, err))
+        if modes is None:
+            modes = asm["info"].get("support_mode")
         if best is None or abs(err) < abs(best[1]):
             best = (body, err, pass_)
         if getattr(a, "skin_mm", None) is not None or abs(err) <= MASS_TOL_KG:
