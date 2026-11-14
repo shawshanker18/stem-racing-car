@@ -124,3 +124,15 @@ def test_floor_high_car_is_built_milled_judged_and_timed_as_one_rod():
         cut = trimesh.creation.box(bounds=[[x - 4, -20, 24.5], [x + 4, 20, 27.5]])
         foam = joints._bool("intersection", [mb, cut])
         assert foam is None or abs(foam.volume) < 0.9 * 8 * 34 * 3.0               # some foam milled away there
+
+
+def test_low_floor_with_a_thick_plate_drops_the_strip_not_into_a_rod():
+    # cars 50105/0 ... 50322/0 (aade33c): a low floor, but the plate too thick for the strip
+    # to fit under it; the rod went to the track (0.87 mm below it, 14.7 mm from the axle)
+    out, g = _build(5.0, top_mm=27.0, bs=bsm.BeamSupport(beam_h_mm=6.0))
+    assert out["_pod"] and not out["_floor_high"]
+    assert "strip_dropped_note" in out["_struct"]
+    _common(out, g)
+    v = out["support"].vertices * 1e3
+    assert v[:, 2].min() >= 1.5                                           # T3.7
+    assert all(m >= 0 for k, m in g.items() if k.startswith("fit_")), g

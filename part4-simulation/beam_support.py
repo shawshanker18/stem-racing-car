@@ -402,6 +402,15 @@ def build(bs: BeamSupport, x_axle_mm: float, z_axle_mm: float, y_inner_mm: float
             st["strip_fit_mm"] = min(tie, room)
             st["strip_fit_note"] = (f"body floor at the axle z {channel['z_floor_mm']:.2f} puts the strip at "
                                     f"z {z_strip:.2f}: {room:.2f} mm under the plate, {tie:.2f} mm on the disc")
+            if st["strip_fit_mm"] < 0 and channel["z_floor_mm"] <= z_axle_mm:
+                # The floor is LOW and still the strip does not fit (the load sizing made the
+                # plate too thick for the room): the floor-high rod would sit at the track, under
+                # the axle (cars 50105/0 ... 50322/0: 0.87 mm below the track, 14.7 mm from the
+                # axle). The frame is sized again without its strip instead: plate alone.
+                again = build(dataclasses.replace(bs, strip=False), x_axle_mm, z_axle_mm, y_inner_mm,
+                              wheel_width_mm, disc, hub_mm=hub_mm, R_mm=R_mm, channel=channel)
+                again["_struct"]["strip_dropped_note"] = st["strip_fit_note"]
+                return again
             if st["strip_fit_mm"] < 0:
                 # FLOOR-HIGH: the pod frame does not fit under this body, so a round rod in a
                 # slot milled up into the body's floor, its top FLOOR_EMBED_MM into the foam
