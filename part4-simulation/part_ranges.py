@@ -16,6 +16,7 @@ every bound just inside (all gates pass) and just outside (the named gate fails)
 from __future__ import annotations
 
 import dataclasses
+import math
 
 import numpy as np
 
@@ -28,11 +29,12 @@ SETTINGS = {
     "front_wing": {"chord_mm": (5.0, 40.0), "t_frac": (0.02, 0.6), "aoa_deg": (-20.0, 30.0),
                    "half_span_mm": (10.0, 60.0), "z_chord_mm": (0.0, 30.0),
                    "flap_chord_mm": (0.0, 20.0), "flap_aoa_deg": (0.0, 60.0),
-                   "gap_to_wheel_mm": (0.0, 20.0)},
+                   "gap_to_wheel_mm": (0.0, 20.0), "camber": (0.0, 0.12)},
     "rear_wing": {"chord_mm": (5.0, 40.0), "t_frac": (0.02, 0.6), "aoa_deg": (-20.0, 30.0),
                   "half_span_mm": (10.0, 45.0), "x_le_after_ref_b_mm": (-10.0, 40.0)},
-    "nose": {"length_mm": (2.0, 60.0), "k": (0.2, 1.5), "p": (1.5, 6.0)},
-    "supports": {"disc_r_mm": (4.0, 16.0), "beam_w_mm": (4.0, 30.0)},
+    "nose": {"length_mm": (2.0, 60.0), "k": (0.2, 1.5), "p": (1.5, 6.0), "tip_z_mm": (0.0, 30.0)},
+    "supports": {"disc_r_mm": (4.0, 16.0), "beam_w_mm": (4.0, 30.0), "beam_h_mm": (0.3, 10.0),
+                 "strip_w_mm": (1.0, 20.0), "pod_wall_mm": (0.3, 5.0)},
 }
 
 # the regulations each setting's range runs into (for the write-up; the gates decide)
@@ -55,6 +57,11 @@ RULES = {
     ("nose", "p"): "T8.5.1 nose half width",
     ("supports", "disc_r_mm"): "T7.12.1 in the wheel's cylinder, rim fit, T7.13 claw, T3.7",
     ("supports", "beam_w_mm"): "T7.12.1 in the wheel's cylinder (the plate's chord)",
+    ("front_wing", "camber"): "T8.5.2 height outboard, T8.7 clear air (the section's shape)",
+    ("nose", "tip_z_mm"): "T8.5.1 nose height, T3.7 track clearance",
+    ("supports", "beam_h_mm"): "T7.12.1 in the cylinder (raised by the load sizing; a floor/pod fit)",
+    ("supports", "strip_w_mm"): "T7.12.1 in the cylinder, T7.13 claw",
+    ("supports", "pod_wall_mm"): "T7.12.1 (the pod in the cylinder), foam over the pod",
 }
 
 
@@ -88,7 +95,13 @@ def gates(part: str, obj, car: Car) -> dict:
         z = R - 0.3
         ch = bsm.pod_channel(obj, car.body, x, z, R)
         out = bsm.build(obj, x, z, car.y_inner_mm, car.wheel_w_mm, True, hub_mm=hub, R_mm=R, channel=ch)
-        return bsm.gates(obj, out, x, z, R, "front")
+        g = bsm.gates(obj, out, x, z, R, "front")
+        if out["_pod"]:                       # the pod's own gates, as assembly.build adds them
+            half = ch["length_mm"] / 2
+            corner = max(math.hypot(half, z - ch["z_floor_mm"]), math.hypot(half, ch["z_arch_mm"] - z))
+            g["T7.12.1_front_pod_in_cylinder"] = R - corner
+            g["machining_front_foam_over_pod"] = ch["z_body_top_mm"] - ch["z_arch_mm"] - 4.0
+        return g
     raise KeyError(part)
 
 
@@ -204,6 +217,13 @@ def project(car: Car, current: dict, proposed: dict, bnds: dict | None = None) -
                 t_bad = t
             else:
                 t_good = t
+        # t = 0 keeps the current numbers but the proposal's switches (e.g. supports.strip on/off);
+        # if that alone is not legal, the switch is not taken either
+        if t_good == 0.0:
+            at_cur = dataclasses.replace(cand, **{s: getattr(cur, s) for s in SETTINGS[part]})
+            if [m for m in gates(part, at_cur, car).values() if m < -1e-9]:
+                out[part] = cur
+                continue
         out[part] = dataclasses.replace(cand, **{s: getattr(cur, s) + t_good * (clip[s] - getattr(cur, s))
                                                  for s in SETTINGS[part]})
     return out

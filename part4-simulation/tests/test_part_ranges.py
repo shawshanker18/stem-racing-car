@@ -71,3 +71,13 @@ def test_loop_bounds_warm_start_and_projection_stays_legal():
     for p, obj in proj.items():
         bad = {k: m for k, m in pr.gates(p, obj, car).items() if m < -1e-9}
         assert not bad, (p, bad)
+
+
+def test_projection_takes_the_strip_switch_only_if_legal():
+    import dataclasses as dc
+    car = _car()
+    cur = {p: pr.DEFAULTS[p]() for p in pr.SETTINGS}
+    prop = dict(cur, supports=dc.replace(cur["supports"], strip=not cur["supports"].strip))
+    out = pr.project(car, cur, prop)
+    assert not [m for m in pr.gates("supports", out["supports"], car).values() if m < -1e-9]
+    assert out["supports"].strip in (True, False)

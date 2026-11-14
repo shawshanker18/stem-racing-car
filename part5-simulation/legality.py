@@ -12,6 +12,7 @@ Margins are in mm (or g for mass). margin >= 0 passes.
 from __future__ import annotations
 
 import math
+import os
 
 import numpy as np
 
@@ -94,6 +95,9 @@ CARTRIDGE_LENGTH_MIN_MM = rc.CARTRIDGE_LENGTH_MIN_MM
 MESH_MAX_EDGE_MM = 8.0             # measured 1.9-7.6 after the remesh, 106 before it
 MESH_MAX_SLIVER_BODY_PCT = 4.0     # measured 0.4-3.2 % after (highest at 0.3 mm), 3.3 % before
 MESH_MAX_SLIVER_PRINTED_PCT = 12.0 # 5.7-11 % after, 25 % before: a wing's sharp trailing edge
+PRINTED_MIN_WALL_MM = 0.7         # the print minimum (Part 4 component_contract.MIN_WALL_MM; typed here, the
+#                                  referee imports nothing from the builders). Team printer figure to come.
+WALL_MEASURE_TOL_MM = 0.02        # the files are 32-bit STL and boolean output: 20 um of round-off
 
 
 def _contains(mesh, pts, chunk: int = 300):
@@ -949,6 +953,17 @@ def manufactured_checks(assembly: dict) -> dict:
         slivers = meshed[sk]["faces_under_5deg_pct"]
         r["mesh_slivers_printed"] = _entry(MESH_MAX_SLIVER_PRINTED_PCT - slivers,
                                            f"{slivers:.2f} % of faces under 5 deg in {sk}")
+    # Measured wall of every printed file (construction floors it at the print minimum;
+    # this measures it). The printer's figure is still to come from the team: until then
+    # PRINTED_MIN_WALL_MM, raised by setting P4_MIN_WALL_MM.
+    walls = {k: _min_wall_mm(v["file"]) for k, v in parts.items()
+             if k.startswith("printed_") and v.get("file") and os.path.exists(v["file"])}
+    if walls:
+        lim = float(os.environ.get("P4_MIN_WALL_MM", PRINTED_MIN_WALL_MM))
+        k = min(walls, key=lambda q: walls[q][0])
+        t, where = walls[k]
+        r["P4.printed_min_wall"] = _entry(t - (lim - WALL_MEASURE_TOL_MM),
+                                          f"{t:.3f} mm in {k} at {where} (print minimum {lim} mm)")
     # T5.1-T5.4 and T5.6 are measured on the milled body in check().
     return r
 
@@ -1177,3 +1192,25 @@ def check(body_half_stl: str, assembly: dict, mass_state: dict | None = None,
 def summary(report: dict) -> dict:
     failed = {k: v for k, v in report.items() if not v["pass"]}
     return {"n_checks": len(report), "n_failed": len(failed), "failed": sorted(failed)}
+
+
+def _min_wall_mm(path: str, n: int = 4000, seed: int = 1) -> tuple:
+    """Thinnest wall of a closed part (file in mm): from n area-uniform surface points a
+    ray goes straight in along the inward normal; where it leaves the part through a face
+    turned back toward it (normals at least 120 deg apart, i.e. an opposite wall, not a
+    side face met at an edge or corner, where a ray only grazes) the length is the wall
+    there. Returns (thinnest wall, where it is in mm)."""
+    import trimesh
+    m = trimesh.load(path, force="mesh")
+    pts, fi = trimesh.sample.sample_surface_even(m, n, seed=seed)
+    nrm = m.face_normals[fi]
+    origins = pts - nrm * 1e-4
+    loc, ray, tri = m.ray.intersects_location(origins, -nrm, multiple_hits=False)
+    if not len(ray):
+        return float("inf"), None
+    opposite = (m.face_normals[tri] * nrm[ray]).sum(axis=1) < -0.5
+    if not opposite.any():
+        return float("inf"), None
+    d = np.linalg.norm(loc[opposite] - pts[ray[opposite]], axis=1)
+    i = int(np.argmin(d))
+    return float(d[i]), np.round(pts[ray[opposite]][i], 2).tolist()
