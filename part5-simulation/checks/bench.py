@@ -78,7 +78,7 @@ def one_run(fname, sigma, kind, seed):
     def meas(x, _):
         calls[0] += 1
         return f(x) + rng.normal(0, sigma)
-    cl.run_local(state, oracle(kind, f, rng), step, meas, sigma, 0.0)
+    cl.run_local(state, oracle(kind, f, rng), step, meas, sigma, 1e-12)   # iid noise: no per-shape term (assert needs > 0)
     best = min(state["chains"], key=lambda c: f(c["x"]))
     ok = f(best["x"]) - fmin <= 2 * sigma
     # a wrong compass is handled when no chain walked uphill: each one either stopped flagged or
@@ -95,7 +95,7 @@ def false_keep(sigma, trials, seed=0):
     keeps = rounds = 0
     for t in range(trials):
         state = {"chains": [cl.new_chain(0, np.full(D, 0.5), 0.2)]}
-        cl.run_local(state, lambda x: np.eye(D)[0], step, lambda x, _: 1.0 + rng.normal(0, sigma), sigma, 0.0)
+        cl.run_local(state, lambda x: np.eye(D)[0], step, lambda x, _: 1.0 + rng.normal(0, sigma), sigma, 1e-12)
         for h in state["chains"][0]["history"]:
             rounds += 1
             keeps += h["kept"]
@@ -118,7 +118,7 @@ def false_keep_shape(shape, trials, repeat=1e-5, aware=True, seed=0):
                 own[k] = rng.normal(0, shape)
             return 1.0 + own[k] + rng.normal(0, repeat)
         state = {"chains": [cl.new_chain(0, np.full(D, 0.5), 0.2)]}
-        cl.run_local(state, lambda x: np.eye(D)[0], step, meas, repeat, shape if aware else 0.0)
+        cl.run_local(state, lambda x: np.eye(D)[0], step, meas, repeat, shape if aware else 1e-12)
         for h in state["chains"][0]["history"]:
             rounds += 1
             keeps += h["kept"]
@@ -134,7 +134,7 @@ def trace(fname, sigma_ms, kind, n, show=6):
         f, fmin = functions(np.random.default_rng(seed))[fname]
         log = []
 
-        def adv(state, res, ps, ss=0.0, f=f, fmin=fmin, log=log):
+        def adv(state, res, ps, ss=1e-12, f=f, fmin=fmin, log=log):
             c = state["chains"][0]
             k = len(c["history"])
             orig(state, res, ps, ss)

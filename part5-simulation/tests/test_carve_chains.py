@@ -26,7 +26,7 @@ def _farm(state, free, max_new):
         for k in running[:free // 2 or 1]:                 # half the running jobs finish each tick
             results[k] = _f(need[k][0]) if k in need else 0.0
         running = [k for k in running if k not in results]
-        cl.advance(state, results, 1e-4, 0.0)
+        cl.advance(state, results, 1e-4, 1e-12)
         ticks += 1
         assert ticks < 20000
     return state

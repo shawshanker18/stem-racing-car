@@ -155,6 +155,7 @@ def advance(state: dict, results: dict, prior_sigma: float, shape_sigma: float) 
     """shape_sigma: Part 2's measured car-to-car noise on the loop's mesh (s). Re-timing one shape
     repeats its own error, so it never averages away: the keep bar always carries 2 shape_sigma^2
     (current car and candidate are two shapes), however many copies are timed."""
+    assert shape_sigma > 0, "shape_sigma must be Part 2's measured car-to-car noise on the loop's mesh"
     """Use whatever results exist; move each chain on once its round's cases are all in."""
     need = needed(state)
     for c in state["chains"]:
