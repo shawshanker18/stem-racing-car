@@ -1,0 +1,20 @@
+name: p3_decimation
+run-name: "Part 3: CFD STL vs judged body on 20 carve.carve cars, two machines"
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+jobs:
+  measure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy: { fail-fast: false, matrix: { machine: [a, b] } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: |
+          sudo apt-get update -q && sudo apt-get install -y -q libopengl0 libglu1-mesa libegl1 libgl1 libgomp1 libxkbcommon0
+          pip install numpy==2.4.6 scipy==1.17.1 pandas trimesh==5.2.0 scikit-image shapely rtree==1.4.1 mapbox-earcut manifold3d==3.5.4 fast_simplification==0.2.0 jax jaxlib matplotlib pymeshlab==2025.7.post1
+      - working-directory: part5-simulation
+        run: python -W ignore -u ../part3-simulation/checks/car_modes.py decimation $(seq -f "c%g" 0 19)
+      - uses: actions/upload-artifact@v4
+        with: { name: "decimation-${{ matrix.machine }}", path: part5-simulation/decimation.json }

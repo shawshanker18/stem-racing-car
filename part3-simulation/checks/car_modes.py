@@ -291,13 +291,31 @@ def judge(d: Path):
 if __name__ == "__main__":
     sys.path[:0] = [".", str(Path(__file__).resolve().parent)]
     cmd = sys.argv[1]
-    if cmd in ("run", "coverage"):
+    if cmd in ("run", "coverage", "decimation"):
         import pattern, solver                          # noqa: E402,F401  (these put the other parts on the path)
     if cmd == "plan":
         its = items()
         print(json.dumps([" ".join(its[i:i + CHUNK]) for i in range(0, len(its), CHUNK)]))
     elif cmd == "run":
         run(None if sys.argv[2] == "-" else str(Path(sys.argv[2]).resolve()), Path(sys.argv[3]), sys.argv[4:])
+    elif cmd == "decimation":                            # CFD STL vs judged body on carve.carve cars
+        rows = []
+        for item in sys.argv[2:]:
+            o = Path("decim") / item
+            o.mkdir(parents=True, exist_ok=True)
+            np.save(o / "field.npy", field(item))
+            p = subprocess.run([sys.executable, "-W", "ignore", "run_car.py", "--out", str(o), "--skin-mm", SKIN,
+                                "--support", "beam", "--phi-npy", str(o / "field.npy"), "--gate-only"],
+                               capture_output=True, text=True)
+            if p.returncode:
+                print(p.stdout[-2000:], p.stderr[-2000:])
+                raise RuntimeError(f"run_car --gate-only failed on {item}")
+            S = json.loads((o / "summary.json").read_text())
+            rows.append({"item": item, **S["decimation"], "cfd_stl_sha": S["hashes"]["timed_cfd_stl"]})
+            print(f"LAB decimation {item}: {json.dumps(rows[-1])}", flush=True)
+        Path("decimation.json").write_text(json.dumps(rows, indent=1))
+        print(f"LAB decimation worst Hausdorff {max(r['hausdorff_mm'] for r in rows):.4f} mm, "
+              f"worst mean {max(r['mean_mm'] for r in rows):.4f} mm over {len(rows)} cars", flush=True)
     elif cmd == "coverage":                              # do the modes tile the whole half body?
         _, V, N = surface(block())
         f, gap, need = coverage(V, N)
